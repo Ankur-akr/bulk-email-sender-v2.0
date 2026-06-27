@@ -13,10 +13,25 @@ async def upload_csv(file: UploadFile = File(...), user=Depends(get_current_user
     if not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only .csv files are accepted")
     content = await file.read()
-    try:
-        df = pd.read_csv(io.StringIO(content.decode("utf-8")))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
+
+    df = None
+    last_error = None
+
+    for encoding in ["utf-8", "utf-8-sig", "cp1252", "latin1"]:
+        try:
+            df = pd.read_csv(
+                io.BytesIO(content),
+                encoding=encoding
+            )
+            break
+        except Exception as e:
+            last_error = e
+
+    if df is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to parse CSV: {last_error}"
+        )
 
     df.columns = [c.strip().lower() for c in df.columns]
     if not {"name", "email"}.issubset(df.columns):
