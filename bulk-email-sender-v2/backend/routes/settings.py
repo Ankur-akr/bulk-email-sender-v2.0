@@ -16,10 +16,10 @@ class SettingsUpdate(BaseModel):
 
 @router.get("/")
 async def get_settings():
-    return database.get_settings()
+    return await database.get_settings()
 
 
 @router.put("/")
 async def update_settings(updates: SettingsUpdate):
     data = {k: v for k, v in updates.dict().items() if v is not None}
-    return database.update_settings(data)
+    return await database.update_settings(data)

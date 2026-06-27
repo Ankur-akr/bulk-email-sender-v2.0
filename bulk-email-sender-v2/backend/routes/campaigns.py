@@ -8,32 +8,24 @@ router = APIRouter()
 
 @router.get("/")
 async def list_campaigns():
-    """Get all campaigns."""
-    campaigns = database.get_all_campaigns()
-    # Return summary (no full contact list)
-    summaries = []
-    for c in campaigns:
-        summaries.append({
-            "id": c["id"],
-            "name": c["name"],
-            "subject": c["subject"],
-            "created_at": c["created_at"],
-            "status": c["status"],
-            "stats": c["stats"]
-        })
-    return summaries
+    campaigns = await database.get_all_campaigns()
+    return [
+        {
+            "id": c["id"], "name": c["name"], "subject": c["subject"],
+            "created_at": c["created_at"], "status": c["status"], "stats": c["stats"],
+        }
+        for c in campaigns
+    ]
 
 
 @router.get("/dashboard")
 async def dashboard_stats():
-    """Get dashboard summary statistics."""
-    return database.get_dashboard_stats()
+    return await database.get_dashboard_stats()
 
 
 @router.get("/{campaign_id}")
 async def get_campaign(campaign_id: str):
-    """Get campaign details including results."""
-    campaign = database.get_campaign(campaign_id)
+    campaign = await database.get_campaign(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
     return campaign
@@ -45,37 +37,24 @@ async def get_campaign_results(
     status: Optional[str] = None,
     search: Optional[str] = None,
     page: int = 1,
-    page_size: int = 50
+    page_size: int = 50,
 ):
-    """Get campaign results with optional filtering and search."""
-    campaign = database.get_campaign(campaign_id)
+    campaign = await database.get_campaign(campaign_id)
     if not campaign:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
     results = campaign.get("results", [])
 
-    # Filter by status
     if status and status in ("sent", "failed", "pending"):
         results = [r for r in results if r["status"] == status]
 
-    # Search by name or email
     if search:
-        search_lower = search.lower()
+        sl = search.lower()
         results = [
             r for r in results
-            if search_lower in r.get("name", "").lower()
-            or search_lower in r.get("email", "").lower()
+            if sl in r.get("name", "").lower() or sl in r.get("email", "").lower()
         ]
 
-    # Paginate
     total = len(results)
     start = (page - 1) * page_size
-    end = start + page_size
-    page_results = results[start:end]
-
-    return {
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "results": page_results
-    }
+    return {"total": total, "page": page, "page_size": page_size, "results": results[start:start + page_size]}
