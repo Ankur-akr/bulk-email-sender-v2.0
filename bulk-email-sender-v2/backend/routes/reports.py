@@ -1,5 +1,5 @@
 """
-Report download routes — streams CSV directly from DB.
+Report download routes — streams CSV directly from PostgreSQL.
 JWT accepted as Bearer header OR ?token= query param.
 """
 
@@ -53,6 +53,7 @@ async def download_report(
             detail="report_type must be 'sent' or 'failed'",
         )
 
+    # Verify campaign ownership
     campaign = await database.get_campaign(
         campaign_id,
         user_id=user["sub"],
@@ -67,20 +68,27 @@ async def download_report(
 
     print("Campaign Name:", campaign["name"])
 
-    csv_bytes = await generate_report_bytes(
-        campaign_id=campaign_id,
-        user_id=user["sub"],
-        report_type=report_type,
-    )
+    # Generate CSV directly from PostgreSQL
+    try:
+        csv_bytes = await generate_report_bytes(
+            campaign_id=campaign_id,
+            user_id=user["sub"],
+            status_filter=report_type,
+        )
+    except Exception as e:
+        print("REPORT GENERATION ERROR:", str(e))
+        raise HTTPException(
+            status_code=500,
+            detail=f"Report generation failed: {str(e)}",
+        )
 
     if not csv_bytes:
-        print("CSV generation returned empty data")
         raise HTTPException(
             status_code=404,
             detail="Report is empty",
         )
 
-    print("CSV Size:", len(csv_bytes), "bytes")
+    print("CSV Length:", len(csv_bytes))
 
     safe_name = "".join(
         c if c.isalnum() else "_"
@@ -93,13 +101,14 @@ async def download_report(
         f"{report_type}.csv"
     )
 
-    print("Returning:", filename)
+    print("Returning file:", filename)
     print("=" * 60)
 
     return StreamingResponse(
         iter([csv_bytes]),
         media_type="text/csv",
         headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/csv",
         },
     )
