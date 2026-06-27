@@ -46,20 +46,23 @@ def get_current_user(
 
 @router.post("/google")
 async def google_login(req: GoogleLoginRequest):
-    """Verify Google ID token and return JWT."""
-    if not GOOGLE_CLIENT_ID:
-        raise HTTPException(status_code=503, detail="Google OAuth not configured")
-
-    user_info = verify_google_token(req.credential)
-    if not user_info:
-        raise HTTPException(status_code=401, detail="Invalid Google credential")
-
-    token = create_jwt(user_info)
-    return {
-        "access_token": token,
-        "token_type": "bearer",
-        "user": user_info
+    import httpx
+    async with httpx.AsyncClient() as client:
+        r = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {req.credential}"}
+        )
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+    info = r.json()
+    user_info = {
+        "email": info.get("email"),
+        "name": info.get("name", info.get("email", "").split("@")[0]),
+        "picture": info.get("picture", ""),
+        "auth_method": "google"
     }
+    token = create_jwt(user_info)
+    return {"access_token": token, "token_type": "bearer", "user": user_info}
 
 
 @router.post("/login")

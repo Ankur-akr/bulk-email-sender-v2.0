@@ -40,7 +40,7 @@ export default function LoginPage() {
   const googleSignIn = useGoogleLogin({
     onSuccess: handleGoogleSuccess,
     onError: () => toast.error('Google login failed'),
-    flow: 'implicit',
+    flow: 'auth-code',
   })
 
   const handleAdminLogin = async (e) => {
