@@ -20,7 +20,7 @@ async def upload_csv(file: UploadFile = File(...)):
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
     
-    ccontent = await file.read()
+    content = await file.read()
 
     df = None
     last_error = None
