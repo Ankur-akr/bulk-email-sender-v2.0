@@ -26,7 +26,8 @@ export default function LoginPage() {
   const handleGoogleSuccess = async (credentialResponse) => {
     setGoogleLoading(true)
     try {
-      const res = await googleLogin(credentialResponse.credential)
+      const token = credentialResponse.access_token || credentialResponse.credential
+      const res = await googleLogin(token)
       setAuth(res.data.access_token, res.data.user)
       toast.success(`Welcome, ${res.data.user.name}!`)
       navigate('/dashboard')
