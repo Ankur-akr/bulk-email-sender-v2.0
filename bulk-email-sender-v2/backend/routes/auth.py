@@ -3,12 +3,13 @@ Authentication routes — supports both Google OAuth and admin username/password
 Uses stateless JWT (Bearer token) so it works on Render without sticky sessions.
 """
 import os
-from fastapi import APIRouter, HTTPException, Depends, Header
+import httpx
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 
-from auth_utils import create_jwt, decode_jwt, verify_google_token
+from auth_utils import create_jwt, decode_jwt
 
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
@@ -18,18 +19,14 @@ ADMIN_PASS = os.getenv("ADMIN_PASSWORD", "admin123")
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
 
-# ── Request / Response models ──────────────────────────────────────────────────
-
 class GoogleLoginRequest(BaseModel):
-    credential: str          # Google ID token from frontend
+    credential: str   # access token from useGoogleLogin implicit flow
 
 
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
 
-
-# ── Dependency: get current user from JWT Bearer token ────────────────────────
 
 def get_current_user(
     creds: Optional[HTTPAuthorizationCredentials] = Depends(security)
@@ -42,27 +39,41 @@ def get_current_user(
     return payload
 
 
-# ── Routes ─────────────────────────────────────────────────────────────────────
-
 @router.post("/google")
 async def google_login(req: GoogleLoginRequest):
-    import httpx
+    """Accept Google access token and return app JWT."""
+    if not GOOGLE_CLIENT_ID:
+        raise HTTPException(status_code=503, detail="Google OAuth not configured")
+
+    # Use the access token to fetch user info from Google
     async with httpx.AsyncClient() as client:
         r = await client.get(
             "https://www.googleapis.com/oauth2/v3/userinfo",
             headers={"Authorization": f"Bearer {req.credential}"}
         )
+
     if r.status_code != 200:
         raise HTTPException(status_code=401, detail="Invalid Google token")
+
     info = r.json()
+    email = info.get("email", "")
+
+    if not email:
+        raise HTTPException(status_code=401, detail="Could not get email from Google")
+
     user_info = {
-        "email": info.get("email"),
-        "name": info.get("name", info.get("email", "").split("@")[0]),
+        "email": email,
+        "name": info.get("name", email.split("@")[0]),
         "picture": info.get("picture", ""),
         "auth_method": "google"
     }
+
     token = create_jwt(user_info)
-    return {"access_token": token, "token_type": "bearer", "user": user_info}
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "user": user_info
+    }
 
 
 @router.post("/login")
