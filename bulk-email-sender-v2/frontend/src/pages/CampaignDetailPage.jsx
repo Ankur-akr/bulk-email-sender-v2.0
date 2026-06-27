@@ -37,6 +37,24 @@ export default function CampaignDetailPage() {
       .finally(() => setLoading(false))
   }, [id, filter, search, page])
 
+  const handleDownload = async (type) => {
+    try {
+      const url = getReportUrl(id, type)
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('Download failed')
+      const blob = await res.blob()
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(blob)
+      link.download = `${campaign.name}_${type}_report.csv`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      URL.revokeObjectURL(link.href)
+    } catch (e) {
+      alert('Failed to download report. Please try again.')
+    }
+  }
+
   if (!campaign && loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -93,26 +111,24 @@ export default function CampaignDetailPage() {
       {/* Download reports */}
       {campaign.status === 'completed' && (
         <div className="flex flex-wrap gap-2">
-          <a
-            href={getReportUrl(id, 'sent')}
-            target="_blank" rel="noreferrer"
+          <button
+            onClick={() => handleDownload('sent')}
             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Download Sent Report
-          </a>
-          <a
-            href={getReportUrl(id, 'failed')}
-            target="_blank" rel="noreferrer"
+          </button>
+          <button
+            onClick={() => handleDownload('failed')}
             className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Download Failed Report
-          </a>
+          </button>
         </div>
       )}
 
