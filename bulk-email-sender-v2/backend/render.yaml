@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: bulk-email-sender-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    disk:
+      name: app-data
+      mountPath: /opt/render/project/src
+      sizeGB: 1
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ENVIRONMENT
+        value: production
+      # Set the rest in Render dashboard:
+      # AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, SENDER_EMAIL
+      # GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+      # JWT_SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD
+      # FRONTEND_URL

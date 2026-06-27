@@ -1,0 +1,12 @@
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/.env
+backend/data/db.json
+backend/logs/
+backend/reports/
+backend/uploads/
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
