@@ -1,92 +1,47 @@
-"""Contacts / CSV upload routes"""
-import io
-import re
-from typing import List
-from fastapi import APIRouter, UploadFile, File, HTTPException
+"""CSV upload — validates and returns contacts. No DB write here (contacts are stored per campaign)."""
+import io, re
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 import pandas as pd
+from routes.auth import get_current_user
 
 router = APIRouter()
-
-EMAIL_REGEX = re.compile(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
-
-
-def validate_email(email: str) -> bool:
-    return bool(EMAIL_REGEX.match(str(email).strip()))
+EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
 
 @router.post("/upload")
-async def upload_csv(file: UploadFile = File(...)):
-    """Upload and validate a CSV file with Name, Email columns."""
-    if not file.filename.endswith(".csv"):
-        raise HTTPException(status_code=400, detail="Only CSV files are supported")
-    
+async def upload_csv(file: UploadFile = File(...), user=Depends(get_current_user)):
+    if not file.filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Only .csv files are accepted")
     content = await file.read()
+    try:
+        df = pd.read_csv(io.StringIO(content.decode("utf-8")))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not parse CSV: {e}")
 
-    df = None
-    last_error = None
+    df.columns = [c.strip().lower() for c in df.columns]
+    if not {"name", "email"}.issubset(df.columns):
+        raise HTTPException(status_code=400,
+            detail=f"CSV must have Name and Email columns. Found: {list(df.columns)}")
 
-    for encoding in ["utf-8", "utf-8-sig", "cp1252", "latin1"]:
-        try:
-            df = pd.read_csv(
-                io.BytesIO(content),
-                encoding=encoding
-            )
-            break
-        except Exception as e:
-            last_error = e
-
-    if df is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Failed to parse CSV: {last_error}"
-        )
-    
-    # Normalize column names
-    df.columns = [col.strip().lower() for col in df.columns]
-    
-    required = {"name", "email"}
-    if not required.issubset(set(df.columns)):
-        raise HTTPException(
-            status_code=400,
-            detail=f"CSV must contain columns: Name, Email. Found: {list(df.columns)}"
-        )
-    
-    # Drop empty rows
     df = df.dropna(subset=["name", "email"])
-    df["name"] = df["name"].astype(str).str.strip()
+    df["name"]  = df["name"].astype(str).str.strip()
     df["email"] = df["email"].astype(str).str.strip()
-    
-    errors = []
-    valid_contacts = []
-    seen_emails = set()
-    
+
+    errors, contacts, seen = [], [], set()
     for idx, row in df.iterrows():
-        name = row["name"]
-        email = row["email"]
-        row_errors = []
-        
-        if not name:
-            row_errors.append("Name is empty")
-        if not validate_email(email):
-            row_errors.append(f"Invalid email: {email}")
-        elif email.lower() in seen_emails:
-            row_errors.append(f"Duplicate email: {email}")
-        
-        if row_errors:
-            errors.append({"row": idx + 2, "name": name, "email": email, "errors": row_errors})
+        name, email = row["name"], row["email"]
+        errs = []
+        if not name:                       errs.append("Name is empty")
+        if not EMAIL_RE.match(email):      errs.append(f"Invalid email: {email}")
+        elif email.lower() in seen:        errs.append(f"Duplicate: {email}")
+        if errs:
+            errors.append({"row": idx + 2, "name": name, "email": email, "errors": errs})
         else:
-            seen_emails.add(email.lower())
-            contact = {"name": name, "email": email}
-            # Include any extra columns
-            for col in df.columns:
-                if col not in ("name", "email"):
-                    contact[col] = str(row[col]) if pd.notna(row[col]) else ""
-            valid_contacts.append(contact)
-    
+            seen.add(email.lower())
+            extra = {c: str(row[c]) for c in df.columns if c not in ("name", "email") and pd.notna(row[c])}
+            contacts.append({"name": name, "email": email, **extra})
+
     return {
-        "total_rows": len(df),
-        "valid_count": len(valid_contacts),
-        "error_count": len(errors),
-        "contacts": valid_contacts,
-        "errors": errors
+        "total_rows": len(df), "valid_count": len(contacts),
+        "error_count": len(errors), "contacts": contacts, "errors": errors,
     }

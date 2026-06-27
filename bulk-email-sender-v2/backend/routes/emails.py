@@ -1,163 +1,142 @@
-"""Email sending routes with background processing and SSE progress streaming."""
+"""Email sending routes — all operations scoped to the authenticated user."""
 import asyncio
 import json
 from datetime import datetime
 from typing import List, Optional, Dict
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import database
 from services.email_service import ses_service
+from routes.auth import get_current_user
 
 router = APIRouter()
 
-# In-memory progress tracker keyed by campaign_id
+# In-memory progress tracker — keyed by campaign_id.
+# Only lives while a campaign is actively sending; no cross-user data risk
+# because campaign IDs are UUIDs and each user only knows their own IDs.
 progress_store: Dict[str, Dict] = {}
 
 
 class SendEmailRequest(BaseModel):
     campaign_name: str
-    subject: str
-    body: str
-    body_html: Optional[str] = None
-    contacts: List[Dict]
-    sender_email: Optional[str] = None
+    subject:       str
+    body:          str
+    body_html:     Optional[str] = None
+    contacts:      List[Dict]
+    sender_email:  Optional[str] = None
     delay_seconds: float = 0.1
-    max_retries: int = 3
+    max_retries:   int   = 3
 
 
-def replace_placeholders(text: str, contact: Dict) -> str:
-    for key, value in contact.items():
-        text = text.replace(f"{{{key}}}", str(value))
+def _replace(text: str, contact: Dict) -> str:
+    for k, v in contact.items():
+        text = text.replace(f"{{{k}}}", str(v))
     return text
 
 
-async def send_campaign_async(campaign_id: str, request: SendEmailRequest):
-    campaign = await database.get_campaign(campaign_id)
-    if not campaign:
-        return
-
-    await database.update_campaign(campaign_id, {"status": "sending"})
-    progress_store[campaign_id] = {
-        "total": len(request.contacts), "sent": 0, "failed": 0,
-        "current_email": "", "status": "sending",
-    }
-
-    settings = await database.get_settings()
-    delay  = request.delay_seconds or settings.get("delay_between_emails", 0.1)
-    retries = request.max_retries or settings.get("max_retry_count", 3)
-    sender  = request.sender_email or settings.get("sender_email", "")
-
-    for contact in request.contacts:
-        name  = contact.get("name", "")
-        email = contact.get("email", "")
-        progress_store[campaign_id]["current_email"] = email
-
-        subject   = replace_placeholders(request.subject, contact)
-        body_text = replace_placeholders(request.body, contact)
-        body_html = replace_placeholders(request.body_html, contact) if request.body_html else None
-
-        result = ses_service.send_email(
-            to_email=email, to_name=name, subject=subject,
-            body_text=body_text, body_html=body_html,
-            sender_email=sender, max_retries=retries,
-        )
-
-        record = {
-            "name": name, "email": email,
-            "status": result["status"],
-            "message_id": result.get("message_id"),
-            "timestamp": datetime.utcnow().isoformat(),
-            "error": result.get("error"),
+async def _send_campaign(campaign_id: str, user_id: str, req: SendEmailRequest):
+    """Background task — writes every result to Postgres under the user's tenant."""
+    try:
+        await database.update_campaign(campaign_id, user_id, {"status": "sending"})
+        progress_store[campaign_id] = {
+            "total": len(req.contacts), "sent": 0, "failed": 0,
+            "current_email": "", "status": "sending",
         }
-        await database.add_campaign_result(campaign_id, record)
 
-        if result["status"] == "sent":
-            progress_store[campaign_id]["sent"] += 1
-        else:
-            progress_store[campaign_id]["failed"] += 1
+        settings = await database.get_settings(user_id)
+        delay    = req.delay_seconds or settings.get("delay_between_emails", 0.1)
+        retries  = req.max_retries   or settings.get("max_retry_count", 3)
+        sender   = req.sender_email  or settings.get("sender_email", "")
 
-        await asyncio.sleep(delay)
+        for contact in req.contacts:
+            name  = contact.get("name",  "")
+            email = contact.get("email", "")
+            progress_store[campaign_id]["current_email"] = email
 
-    await database.update_campaign(campaign_id, {"status": "completed"})
-    progress_store[campaign_id]["status"] = "completed"
+            result = ses_service.send_email(
+                to_email=email, to_name=name,
+                subject=_replace(req.subject, contact),
+                body_text=_replace(req.body, contact),
+                body_html=_replace(req.body_html, contact) if req.body_html else None,
+                sender_email=sender, max_retries=retries,
+            )
 
-    from services.report_service import generate_reports
-    generate_reports(campaign_id)
+            await database.add_campaign_result(campaign_id, user_id, {
+                "name": name, "email": email,
+                "status":     result["status"],
+                "message_id": result.get("message_id"),
+                "timestamp":  datetime.utcnow().isoformat(),
+                "error":      result.get("error"),
+            })
+
+            if result["status"] == "sent":
+                progress_store[campaign_id]["sent"] += 1
+            else:
+                progress_store[campaign_id]["failed"] += 1
+
+            await asyncio.sleep(delay)
+
+        await database.update_campaign(campaign_id, user_id, {"status": "completed"})
+        progress_store[campaign_id]["status"] = "completed"
+
+        from services.report_service import generate_reports
+        await generate_reports(campaign_id, user_id)
+
+    except Exception:
+        await database.update_campaign(campaign_id, user_id, {"status": "failed"})
+        progress_store[campaign_id]["status"] = "failed"
+        raise
 
 
 @router.post("/send")
-async def send_emails(req: SendEmailRequest, background_tasks: BackgroundTasks):
+async def send_emails(
+    req: SendEmailRequest,
+    background_tasks: BackgroundTasks,
+    user=Depends(get_current_user),
+):
     if not req.contacts:
         raise HTTPException(status_code=400, detail="No contacts provided")
 
     campaign = await database.create_campaign(
+        user_id=user["sub"],
         name=req.campaign_name, subject=req.subject,
-        body=req.body, contacts=req.contacts,
+        body=req.body, body_html=req.body_html,
+        contacts=req.contacts,
     )
-    background_tasks.add_task(send_campaign_async, campaign["id"], req)
+    background_tasks.add_task(_send_campaign, campaign["id"], user["sub"], req)
     return {"campaign_id": campaign["id"], "message": "Campaign started", "total": len(req.contacts)}
 
 
 @router.get("/progress/{campaign_id}")
-async def get_progress(campaign_id: str):
+async def get_progress(campaign_id: str, user=Depends(get_current_user)):
+    # Verify ownership before returning progress
     prog = progress_store.get(campaign_id)
-    if not prog:
-        campaign = await database.get_campaign(campaign_id)
-        if not campaign:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        stats = campaign["stats"]
+    if prog:
+        total = prog["total"]
+        done  = prog["sent"] + prog["failed"]
         return {
-            "total": stats["total"], "sent": stats["sent"], "failed": stats["failed"],
-            "pending": stats["pending"], "status": campaign["status"], "current_email": "",
+            "total": total, "sent": prog["sent"], "failed": prog["failed"],
+            "pending": total - done,
+            "percentage": round(done / total * 100, 1) if total else 0,
+            "status": prog["status"],
+            "current_email": prog.get("current_email", ""),
         }
 
-    total = prog["total"]
-    done  = prog["sent"] + prog["failed"]
+    c = await database.get_campaign(campaign_id, user_id=user["sub"])
+    if not c:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    stats = c["stats"]
+    done  = stats["sent"] + stats["failed"]
     return {
-        "total": total, "sent": prog["sent"], "failed": prog["failed"],
-        "pending": total - done,
-        "percentage": round(done / total * 100, 1) if total > 0 else 0,
-        "status": prog["status"], "current_email": prog.get("current_email", ""),
+        "total": stats["total"], "sent": stats["sent"],
+        "failed": stats["failed"], "pending": stats["pending"],
+        "percentage": round(done / stats["total"] * 100, 1) if stats["total"] else 0,
+        "status": c["status"], "current_email": "",
     }
 
 
-@router.get("/progress-stream/{campaign_id}")
-async def progress_stream(campaign_id: str):
-    async def event_generator():
-        while True:
-            prog = progress_store.get(campaign_id)
-            if not prog:
-                campaign = await database.get_campaign(campaign_id)
-                if campaign:
-                    stats = campaign["stats"]
-                    data = {
-                        "total": stats["total"], "sent": stats["sent"],
-                        "failed": stats["failed"], "pending": stats["pending"],
-                        "percentage": 0, "status": campaign["status"],
-                    }
-                else:
-                    data = {"status": "not_found"}
-            else:
-                total = prog["total"]
-                done  = prog["sent"] + prog["failed"]
-                data  = {
-                    "total": total, "sent": prog["sent"], "failed": prog["failed"],
-                    "pending": total - done,
-                    "percentage": round(done / total * 100, 1) if total > 0 else 0,
-                    "status": prog["status"],
-                    "current_email": prog.get("current_email", ""),
-                }
-
-            yield f"data: {json.dumps(data)}\n\n"
-            if data.get("status") in ("completed", "failed", "not_found"):
-                break
-            await asyncio.sleep(1)
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
-
-
 @router.post("/verify-credentials")
-async def verify_credentials():
+async def verify_credentials(user=Depends(get_current_user)):
     return ses_service.verify_credentials()

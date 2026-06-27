@@ -1,9 +1,9 @@
 """
-Bulk Personalized Email Sender - FastAPI Backend
-PostgreSQL edition (SQLAlchemy async + asyncpg)
+Bulk Email Sender v3 — FastAPI entry point.
+Multi-tenant: every request is scoped to the authenticated user via JWT sub.
 """
-import os
-import logging
+import os, logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -14,49 +14,29 @@ load_dotenv()
 from database import init_db
 from routes import auth, campaigns, contacts, emails, reports, settings
 
-# Create required directories
-for d in ["uploads", "reports", "logs", "templates"]:
+for d in ["reports", "logs", "uploads"]:
     os.makedirs(d, exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler("logs/app.log"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-app = FastAPI(
-    title="Bulk Email Sender API",
-    description="Production-ready bulk personalized email sending service (PostgreSQL)",
-    version="3.0.0"
+    format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    handlers=[logging.FileHandler("logs/app.log"), logging.StreamHandler()],
 )
 
-# ── Startup: create tables ────────────────────────────────────────────────────
-@app.on_event("startup")
-async def startup():
-    await init_db()
-    logger.info("Database initialised")
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()   # create tables on startup (idempotent)
+    yield
+
+
+app = FastAPI(title="Bulk Email Sender API", version="3.0.0", lifespan=lifespan)
+
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
-
-# EXTRA_ORIGINS: comma-separated extra URLs (e.g. Vercel preview URLs)
-extra = [u.strip() for u in os.getenv("EXTRA_ORIGINS", "").split(",") if u.strip()]
-
-origins = list({
-    FRONTEND_URL,
-    "http://localhost:3000",
-    "http://localhost:5173",
-    *extra,
-})
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
+    allow_origins=[FRONTEND_URL, "http://localhost:3000", "http://localhost:5173"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -72,11 +52,10 @@ app.include_router(settings.router,  prefix="/api/settings",  tags=["settings"])
 
 
 @app.get("/api/health")
-async def health_check():
-    return {"status": "healthy", "version": "3.0.0", "db": "postgresql"}
+async def health():
+    return {"status": "healthy", "version": "3.0.0"}
 
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)
+    uvicorn.run("app:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=False)

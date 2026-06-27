@@ -1,60 +1,52 @@
-"""Campaign management routes."""
-from fastapi import APIRouter, HTTPException
+"""Campaign routes — every query scoped to the authenticated user."""
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional
 import database
+from routes.auth import get_current_user
 
 router = APIRouter()
 
 
+@router.get("/dashboard")
+async def dashboard_stats(user=Depends(get_current_user)):
+    return await database.get_dashboard_stats(user_id=user["sub"])
+
+
 @router.get("/")
-async def list_campaigns():
-    campaigns = await database.get_all_campaigns()
+async def list_campaigns(user=Depends(get_current_user)):
+    campaigns = await database.get_all_campaigns(user_id=user["sub"])
+    # Strip verbose fields not needed in list view
     return [
-        {
-            "id": c["id"], "name": c["name"], "subject": c["subject"],
-            "created_at": c["created_at"], "status": c["status"], "stats": c["stats"],
-        }
+        {k: v for k, v in c.items() if k not in ("body", "reports")}
         for c in campaigns
     ]
 
 
-@router.get("/dashboard")
-async def dashboard_stats():
-    return await database.get_dashboard_stats()
-
-
 @router.get("/{campaign_id}")
-async def get_campaign(campaign_id: str):
-    campaign = await database.get_campaign(campaign_id)
-    if not campaign:
+async def get_campaign(campaign_id: str, user=Depends(get_current_user)):
+    # get_campaign already filters by user_id — returns None if not owner
+    c = await database.get_campaign(campaign_id, user_id=user["sub"])
+    if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    return campaign
+    return c
 
 
 @router.get("/{campaign_id}/results")
-async def get_campaign_results(
+async def campaign_results(
     campaign_id: str,
-    status: Optional[str] = None,
-    search: Optional[str] = None,
-    page: int = 1,
-    page_size: int = 50,
+    status:    Optional[str] = Query(None),
+    search:    Optional[str] = Query(None),
+    page:      int           = Query(1,  ge=1),
+    page_size: int           = Query(50, ge=1, le=200),
+    user=Depends(get_current_user),
 ):
-    campaign = await database.get_campaign(campaign_id)
-    if not campaign:
+    # Confirm the campaign belongs to this user before returning results
+    c = await database.get_campaign(campaign_id, user_id=user["sub"])
+    if not c:
         raise HTTPException(status_code=404, detail="Campaign not found")
 
-    results = campaign.get("results", [])
-
-    if status and status in ("sent", "failed", "pending"):
-        results = [r for r in results if r["status"] == status]
-
-    if search:
-        sl = search.lower()
-        results = [
-            r for r in results
-            if sl in r.get("name", "").lower() or sl in r.get("email", "").lower()
-        ]
-
-    total = len(results)
-    start = (page - 1) * page_size
-    return {"total": total, "page": page, "page_size": page_size, "results": results[start:start + page_size]}
+    return await database.get_campaign_results(
+        campaign_id, user_id=user["sub"],
+        status=status, search=search,
+        page=page, page_size=page_size,
+    )
