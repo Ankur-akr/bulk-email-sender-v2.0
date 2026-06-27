@@ -34,6 +34,7 @@ async def download_report(
     report_type: str,
     user=Depends(_get_user),
 ):
+    print("DOWNLOAD ENDPOINT HIT")
     if report_type not in ("sent", "failed"):
         raise HTTPException(status_code=400, detail="report_type must be 'sent' or 'failed'")
 
