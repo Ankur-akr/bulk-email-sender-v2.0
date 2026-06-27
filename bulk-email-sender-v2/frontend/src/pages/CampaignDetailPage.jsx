@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import api, { getCampaign, getCampaignResults } from '../services/api'
+import { getCampaign, getCampaignResults, getReportUrl } from '../services/api'
 
 const statusBadge = (status) => {
   const map = {
@@ -48,35 +48,7 @@ export default function CampaignDetailPage() {
   if (!campaign) return <p className="text-slate-500">Campaign not found.</p>
 
   const rate = campaign.stats.total > 0 ? Math.round(campaign.stats.sent / campaign.stats.total * 100) : 0
-  const downloadReport = async (type) => {
-  try {
-    const response = await api.get(
-      `/reports/${id}/download/${type}`,
-      {
-        responseType: "blob",
-      }
-    );
 
-    const blob = new Blob([response.data], {
-      type: "text/csv",
-    });
-
-    const url = window.URL.createObjectURL(blob);
-
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${campaign.name}_${type}.csv`;
-
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-
-    window.URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error(err);
-    alert("Failed to download report.");
-  }
-};
   return (
     <div className="space-y-5">
       <div className="flex items-center gap-3">
@@ -119,39 +91,30 @@ export default function CampaignDetailPage() {
       </div>
 
       {/* Download reports */}
-{campaign.status === 'completed' && (
-  <div className="flex flex-wrap gap-2">
-    <button
-      onClick={() => downloadReport("sent")}
-      className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
-    >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-        />
-      </svg>
-      Download Sent Report
-    </button>
-
-    <button
-      onClick={() => downloadReport("failed")}
-      className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
-    >
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth={2}
-          d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-        />
-      </svg>
-      Download Failed Report
-    </button>
-  </div>
-)}
+      {campaign.status === 'completed' && (
+        <div className="flex flex-wrap gap-2">
+          <a
+            href={getReportUrl(id, 'sent')}
+            target="_blank" rel="noreferrer"
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download Sent Report
+          </a>
+          <a
+            href={getReportUrl(id, 'failed')}
+            target="_blank" rel="noreferrer"
+            className="flex items-center gap-2 px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            Download Failed Report
+          </a>
+        </div>
+      )}
 
       {/* Results table */}
       <div className="bg-white rounded-xl border border-slate-200">
