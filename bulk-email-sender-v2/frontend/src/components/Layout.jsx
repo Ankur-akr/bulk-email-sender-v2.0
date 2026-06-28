@@ -39,11 +39,11 @@ export default function Layout() {
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 transform transition-transform duration-200 lg:translate-x-0 lg:static lg:inset-auto ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {/* Logo */}
 
-        <div className="h-16 flex items-center px-5 border-b border-slate-200">
+        <div className="h-16 flex items-center justify-center border-b border-slate-200">
           <img
             src="/logo.png"
             alt="Bulk Email Sender Pro"
-            className="h-11 w-auto object-contain"
+            className="h-12 w-auto object-contain"
           />
         </div>
 
