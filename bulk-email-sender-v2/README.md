@@ -1,165 +1,469 @@
-# Bulk Email Sender v2 — Production Deployment Guide
+# 📧 Bulk Email Sender Pro
 
-**Stack:** React (Vercel) + FastAPI (Render) + Amazon SES + Google OAuth
+> A production-ready bulk email campaign platform built with React, FastAPI, PostgreSQL, and AWS SES.
 
----
-
-## Platform Decision
-
-| | Vercel | Netlify | Firebase |
-|---|---|---|---|
-| **Frontend** | ✅ Best for Vite/React | ✅ Good | ⚠️ More setup |
-| **Speed** | Fastest (Edge network) | Fast | Decent |
-| **Free tier** | Generous | Generous | Limited |
-
-| | Render | Railway |
-|---|---|---|
-| **Backend** | ✅ **Recommended** — persistent disk, free tier | ✅ Good, simpler |
-| **Persistent storage** | ✅ Yes (needed for db.json, reports) | ⚠️ Extra cost |
-| **Free tier sleep** | Spins down after 15min (upgrade $7/mo to avoid) | No sleep on paid |
-
-**→ Use: Frontend on Vercel + Backend on Render**
+![React](https://img.shields.io/badge/React-18-blue?logo=react)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green?logo=fastapi)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue?logo=postgresql)
+![AWS SES](https://img.shields.io/badge/AWS-SES-orange?logo=amazonaws)
+![License](https://img.shields.io/badge/License-MIT-green)
 
 ---
 
-## Step 1 — Set Up Google OAuth
+## Architecture
+Screenshots\Architecture.png
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a project (or use existing)
-3. Go to **APIs & Services → Credentials**
-4. Click **Create Credentials → OAuth 2.0 Client ID**
-5. Application type: **Web application**
-6. Add **Authorized JavaScript origins:**
-   - `http://localhost:3000` (dev)
-   - `https://your-app.vercel.app` (production)
-7. Add **Authorized redirect URIs:**
-   - `http://localhost:3000`
-   - `https://your-app.vercel.app`
-8. Copy the **Client ID** and **Client Secret**
+
+
+## 🌐 Live Demo
+
+### Frontend
+**https://mail.ankurrai.in**
+
+### Backend API
+**https://bulk-email-sender-v2-0.onrender.com**
+
+### Health Endpoint
+**https://bulk-email-sender-v2-0.onrender.com/api/health**
 
 ---
 
-## Step 2 — Deploy Backend to Render
+# 📖 Overview
 
-1. Push your code to GitHub (backend folder)
-2. Go to [render.com](https://render.com) → **New → Web Service**
-3. Connect your GitHub repo
-4. Configure:
-   - **Root Directory:** `backend`
-   - **Runtime:** Python 3
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `uvicorn app:app --host 0.0.0.0 --port $PORT`
-5. Add a **Disk** (for persistent db + reports):
-   - Name: `app-data`
-   - Mount Path: `/opt/render/project/src`
-   - Size: 1 GB
-6. Set **Environment Variables** in Render dashboard:
+Bulk Email Sender Pro is a cloud-based email campaign platform that allows users to send personalized emails to thousands of recipients securely using Amazon SES.
+
+The application supports Google OAuth authentication, campaign tracking, CSV uploads, email personalization, delivery reports, and multi-user data isolation.
+
+---
+
+# ✨ Features
+
+## Authentication
+
+- Google OAuth 2.0 Login
+- JWT Authentication
+- Admin Login
+- Secure Protected APIs
+
+---
+
+## Email Campaigns
+
+- Create Email Campaigns
+- Rich Text Email Editor
+- HTML Email Support
+- Plain Text Email Support
+- Personalized Variables
+
+Example
 
 ```
-AWS_ACCESS_KEY_ID        = your_key
-AWS_SECRET_ACCESS_KEY    = your_secret
-AWS_REGION               = us-east-1
-SENDER_EMAIL             = you@yourdomain.com
-GOOGLE_CLIENT_ID         = xxxxx.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET     = your_secret
-JWT_SECRET_KEY           = (run: openssl rand -hex 32)
-ADMIN_USERNAME           = admin
-ADMIN_PASSWORD           = StrongPassword123!
-FRONTEND_URL             = https://your-app.vercel.app
-ENVIRONMENT              = production
-```
+Hello {name},
 
-7. Click **Deploy** — note your Render URL: `https://your-app.onrender.com`
+Welcome to our platform.
+```
 
 ---
 
-## Step 3 — Deploy Frontend to Vercel
+## CSV Upload
 
-1. Push frontend folder to GitHub
-2. Go to [vercel.com](https://vercel.com) → **New Project**
-3. Import your GitHub repo
-4. Configure:
-   - **Root Directory:** `frontend`
-   - **Framework Preset:** Vite
-   - **Build Command:** `npm run build`
-   - **Output Directory:** `dist`
-5. Set **Environment Variables** in Vercel dashboard:
+Supports:
 
-```
-VITE_API_URL           = https://your-app.onrender.com/api
-VITE_GOOGLE_CLIENT_ID  = xxxxx.apps.googleusercontent.com
-```
+- UTF-8
+- UTF-8 BOM
+- CP1252
+- Latin-1
 
-6. Click **Deploy** — your app is live at `https://your-app.vercel.app`
+Features
+
+- Duplicate Email Detection
+- Email Validation
+- Empty Row Removal
+- Extra Column Support
+- Automatic Encoding Detection
 
 ---
 
-## Step 4 — Update Google OAuth with Real URLs
+## Campaign Tracking
 
-Go back to [Google Cloud Console](https://console.cloud.google.com) → Credentials → your OAuth client:
+View
 
-- Add `https://your-app.vercel.app` to **Authorized JavaScript origins**
-- Save
+- Total Emails
+- Sent Emails
+- Failed Emails
+- Success Rate
+- Live Progress
+- Campaign Status
 
 ---
 
-## Local Development
+## Reports
+
+Generate
+
+- Sent Report
+- Failed Report
+
+Download reports as CSV directly from PostgreSQL.
+
+---
+
+## Dashboard
+
+- Campaign Overview
+- Statistics
+- Search
+- Filters
+- Pagination
+
+---
+
+## User Isolation
+
+Each user can only access
+
+- Their Campaigns
+- Their Reports
+- Their Contacts
+- Their Settings
+
+Complete multi-user PostgreSQL architecture.
+
+---
+
+# 🏗 Architecture
+
+```
+                React + Vite
+                      │
+                      │
+          JWT Authentication
+                      │
+                      ▼
+          FastAPI REST Backend
+                      │
+      ┌───────────────┼──────────────┐
+      │               │              │
+ PostgreSQL       AWS SES      Google OAuth
+      │               │              │
+ Campaigns      Email Sending    Authentication
+ Results
+ Reports
+```
+
+---
+
+# 🛠 Tech Stack
+
+## Frontend
+
+- React.js
+- Vite
+- Tailwind CSS
+- Axios
+- React Router
+- React Toastify
+
+---
+
+## Backend
+
+- FastAPI
+- Python
+- Pandas
+- JWT
+- Boto3
+- Google Auth
+- Uvicorn
+
+---
+
+## Database
+
+- PostgreSQL (Render)
+
+---
+
+## Cloud Services
+
+- AWS SES
+- Google OAuth 2.0
+- Render
+- Vercel
+- Cloudflare DNS
+
+---
+
+# 📂 Project Structure
+
+```
+bulk-email-sender-v2/
+
+│
+├── frontend/
+│   ├── src/
+│   ├── pages/
+│   ├── components/
+│   ├── services/
+│   └── hooks/
+│
+├── backend/
+│   ├── routes/
+│   ├── services/
+│   ├── database.py
+│   ├── auth_utils.py
+│   ├── app.py
+│   └── requirements.txt
+│
+└── README.md
+```
+
+---
+
+# 🚀 Installation
+
+## Clone Repository
 
 ```bash
-# Backend
-cd backend
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in your values
-uvicorn app:app --reload --port 8000
+git clone https://github.com/Ankur-akr/bulk-email-sender-v2.0.git
+```
 
-# Frontend (new terminal)
+```
+cd bulk-email-sender-v2.0
+```
+
+---
+
+## Frontend
+
+```
 cd frontend
 npm install
-cp .env.example .env.local   # fill in your values
 npm run dev
 ```
 
-Open `http://localhost:3000`
+---
+
+## Backend
+
+```
+cd backend
+
+python -m venv venv
+
+source venv/bin/activate
+```
+
+Windows
+
+```
+venv\Scripts\activate
+```
+
+Install packages
+
+```
+pip install -r requirements.txt
+```
+
+Run
+
+```
+uvicorn app:app --reload
+```
 
 ---
 
-## Auth Flow
+# ⚙ Environment Variables
 
 ```
-User clicks "Continue with Google"
-  → Google popup opens
-  → User approves
-  → Google returns ID token to frontend
-  → Frontend POSTs token to /api/auth/google
-  → Backend verifies token with Google
-  → Backend returns JWT
-  → Frontend stores JWT in localStorage
-  → All API calls send: Authorization: Bearer <jwt>
+JWT_SECRET_KEY=
+
+JWT_ALGORITHM=HS256
+
+JWT_EXPIRE_HOURS=24
+
+DATABASE_URL=
+
+AWS_ACCESS_KEY_ID=
+
+AWS_SECRET_ACCESS_KEY=
+
+AWS_REGION=
+
+SENDER_EMAIL=
+
+GOOGLE_CLIENT_ID=
+
+FRONTEND_URL=
 ```
 
 ---
 
-## Environment Variables Reference
+# 📧 Email Flow
 
-### Backend (Render)
-| Variable | Description |
-|---|---|
-| `GOOGLE_CLIENT_ID` | From Google Cloud Console |
-| `GOOGLE_CLIENT_SECRET` | From Google Cloud Console |
-| `JWT_SECRET_KEY` | Random 32+ char string (`openssl rand -hex 32`) |
-| `JWT_EXPIRE_HOURS` | Token lifetime (default: 24) |
-| `ALLOWED_DOMAINS` | Restrict to email domains e.g. `yourco.com` (optional) |
-| `FRONTEND_URL` | Your Vercel URL for CORS |
-| `AWS_ACCESS_KEY_ID` | AWS IAM key |
-| `AWS_SECRET_ACCESS_KEY` | AWS IAM secret |
-| `AWS_REGION` | SES region |
-| `SENDER_EMAIL` | Verified SES sender |
-| `ADMIN_USERNAME` | Fallback login username |
-| `ADMIN_PASSWORD` | Fallback login password |
+```
+Upload CSV
+      │
+      ▼
+Validate Contacts
+      │
+      ▼
+Create Campaign
+      │
+      ▼
+Send using AWS SES
+      │
+      ▼
+Store Results
+      │
+      ▼
+Generate Reports
+      │
+      ▼
+Download CSV
+```
 
-### Frontend (Vercel)
-| Variable | Description |
-|---|---|
-| `VITE_API_URL` | Your Render backend URL + `/api` |
-| `VITE_GOOGLE_CLIENT_ID` | Same Google Client ID as backend |
+---
+
+# 🔒 Security
+
+- JWT Authentication
+- Protected APIs
+- Google OAuth 2.0
+- Campaign Ownership Verification
+- PostgreSQL User Isolation
+- Secure Environment Variables
+
+---
+
+# 📊 Key Features
+
+✔ Personalized Emails
+
+✔ CSV Import
+
+✔ HTML Emails
+
+✔ Campaign History
+
+✔ Download Reports
+
+✔ Google Authentication
+
+✔ PostgreSQL Storage
+
+✔ AWS SES Integration
+
+✔ Production Deployment
+
+✔ Custom Domain
+
+✔ Health Monitoring
+
+---
+
+# 📸 Screenshots
+
+```
+Login Page
+Screenshots\Login Page.png
+
+Dashboard
+Screenshots\Dashboard.png
+
+Campaign Page
+Screenshots\Campaign Page.png
+
+Reports
+Screenshots\Reports.png
+
+CSV Upload
+Screenshots\Upload CSV.
+
+Settings
+Screenshots\Settings.png
+```
+
+---
+
+# 🌍 Deployment
+
+Frontend
+
+- Vercel
+
+Backend
+
+- Render
+
+Database
+
+- Render PostgreSQL
+
+Email
+
+- AWS SES
+
+Domain
+
+- Hostinger DNS
+
+SSL
+
+- Cloudflare
+
+---
+
+# 🔮 Future Improvements
+
+- Email Scheduling
+- Contact Groups
+- Email Templates
+- Open Tracking
+- Click Tracking
+- Campaign Analytics
+- Docker Support
+- CI/CD Pipeline
+- Redis Queue
+- Background Workers
+
+---
+
+# 👨‍💻 Author
+
+**Ankur Kumar Rai**
+
+Computer Science Engineering Student
+
+Full Stack Developer
+
+📧 Email
+
+ankurrai5711@gmail.com
+
+🌐 Portfolio
+
+https://mail.ankurrai.in
+
+GitHub
+
+https://github.com/Ankur-akr
+
+LinkedIn
+
+www.linkedin.com/in/ankur-akr
+
+---
+
+# ⭐ Support
+
+If you like this project,
+
+please ⭐ Star the repository on GitHub.
+
+---
+
+# 📄 License
+
+This project is licensed under the MIT License.

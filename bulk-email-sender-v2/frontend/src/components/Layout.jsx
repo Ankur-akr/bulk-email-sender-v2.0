@@ -38,18 +38,13 @@ export default function Layout() {
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 z-50 w-64 bg-white border-r border-slate-200 transform transition-transform duration-200 lg:translate-x-0 lg:static lg:inset-auto ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         {/* Logo */}
-        <div className="h-16 flex items-center px-6 border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
-            </div>
-            <div>
-              <p className="font-bold text-slate-900 text-sm leading-tight">Bulk Email</p>
-              <p className="text-xs text-slate-500">Sender Pro</p>
-            </div>
-          </div>
+
+        <div className="h-16 flex items-center px-5 border-b border-slate-200">
+          <img
+            src="/logo.png"
+            alt="Bulk Email Sender Pro"
+            className="h-11 w-auto object-contain"
+          />
         </div>
 
         {/* Nav */}
