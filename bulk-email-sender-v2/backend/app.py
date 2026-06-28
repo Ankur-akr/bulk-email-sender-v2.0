@@ -51,9 +51,12 @@ app.include_router(reports.router,   prefix="/api/reports",   tags=["reports"])
 app.include_router(settings.router,  prefix="/api/settings",  tags=["settings"])
 
 
-@app.get("/api/health")
+@app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
-    return {"status": "healthy", "version": "3.0.0"}
+    return {
+        "status": "healthy",
+        "version": "3.0.0"
+    }
 
 
 if __name__ == "__main__":
