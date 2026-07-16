@@ -11,8 +11,7 @@
 ---
 
 ## Architecture
-Screenshots\Architecture.png
-
+![Architecture](Screenshots\Architecture.png)
 
 
 ## 🌐 Live Demo
@@ -367,22 +366,23 @@ Download CSV
 
 ```
 Login Page
-Screenshots\Login Page.png
+![Login Page](Screenshots\Login Page.png)
 
 Dashboard
-Screenshots\Dashboard.png
+![Dashboard](Screenshots\Dashboard.png)
 
 Campaign Page
-Screenshots\Campaign Page.png
+![Campaign Page](Screenshots\Campaign Page.png)
 
 Reports
-Screenshots\Reports.png
+![Reports](Screenshots\Reports.png)
 
 CSV Upload
-Screenshots\Upload CSV.
+![CSV Upload](Screenshots\UploadCSV.png)
 
 Settings
-Screenshots\Settings.png
+![Settings](Screenshots\Settings.png)
+
 ```
 
 ---
