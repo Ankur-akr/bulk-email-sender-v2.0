@@ -107,6 +107,42 @@ export default function LoginPage() {
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
 
+          {/* Demo Notice */}
+          <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4">
+            <div className="flex items-start gap-3">
+              <svg
+                className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01M10.29 3.86l-7.55 13.09A1 1 0 003.6 18.5h16.8a1 1 0 00.86-1.55L13.71 3.86a1 1 0 00-1.72 0z"
+                />
+              </svg>
+
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Demo Version
+                </h3>
+
+                <p className="mt-1 text-sm text-amber-800">
+                  This application is publicly hosted for demonstration purposes.
+                  <strong> Google Sign-In is fully functional.</strong> However, email
+                  sending and certain backend integrations have been disabled because the
+                  production API credentials have been revoked for security reasons.
+                </p>
+
+                <p className="mt-2 text-xs text-amber-700">
+                  Please contact the developer for a full demonstration.
+                </p>
+              </div>
+            </div>
+          </div>
+
           {/* Google Sign-In — always shown */}
           <div className="mb-6">
             {checkingGoogle ? (
