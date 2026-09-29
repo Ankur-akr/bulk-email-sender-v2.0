@@ -379,7 +379,7 @@ Reports
 CSV Upload
 ![CSV Upload](Screenshots/UploadCSV.png)
 
-Settings
+Settings 
 ![Settings](Screenshots/Settings.png)
 
 
