@@ -88,13 +88,16 @@ def _build_engine_config(raw_url: str):
     elif not is_local:
         connect_args["ssl"] = "require"       # safe default for any remote host
 
-    # ── PgBouncer / pooled endpoints ──
-    # Transaction-mode poolers (Supabase :6543, Neon "-pooler" hosts) break
-    # asyncpg's prepared-statement cache, so switch it off for them.
-    port = url.port or 5432
-    if "pooler" in host or port == 6543 or os.getenv("DB_USE_POOLER", "").lower() in ("1", "true", "yes"):
-        connect_args["statement_cache_size"] = 0
-        connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid.uuid4()}__"
+    # ── PgBouncer / prepared-statement compatibility ──
+    # The deployed PostgreSQL connection is using PgBouncer transaction/statement
+    # pooling. asyncpg prepared statements can become invalid when a pooled
+    # connection is switched between backend PostgreSQL connections.
+    #
+    # Disable asyncpg's statement cache and generate a unique prepared-statement
+    # name for every statement. This is safe for both pooled and direct
+    # PostgreSQL connections and avoids relying on hostname/port detection.
+    connect_args["statement_cache_size"] = 0
+    connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid.uuid4()}__"
 
     # Fail fast instead of hanging forever if the DB is unreachable / waking up
     connect_args["timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
