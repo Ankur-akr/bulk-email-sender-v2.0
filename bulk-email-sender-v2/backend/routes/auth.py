@@ -12,6 +12,7 @@ GET  /api/auth/me      — returns current user from JWT (no DB hit).
 GET  /api/auth/google-client-id — lets frontend read client ID from env.
 """
 import os
+import hmac
 import httpx
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -25,7 +26,7 @@ router   = APIRouter()
 security = HTTPBearer(auto_error=False)
 
 ADMIN_USER        = os.getenv("ADMIN_USERNAME",  "admin")
-ADMIN_PASS        = os.getenv("ADMIN_PASSWORD",  "admin123")
+ADMIN_PASS        = os.getenv("ADMIN_PASSWORD",  "")   # empty = admin login disabled
 GOOGLE_CLIENT_ID  = os.getenv("GOOGLE_CLIENT_ID", "")
 ALLOWED_DOMAINS   = [
     d.strip()
@@ -113,7 +114,9 @@ async def google_login(req: GoogleLoginRequest):
 @router.post("/login")
 async def admin_login(req: AdminLoginRequest):
     """Fallback admin login — uses email as the stable user_id."""
-    if req.username != ADMIN_USER or req.password != ADMIN_PASS:
+    if not ADMIN_PASS:
+        raise HTTPException(status_code=503, detail="Admin login is disabled on this server")
+    if not (hmac.compare_digest(req.username, ADMIN_USER) and hmac.compare_digest(req.password, ADMIN_PASS)):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     user_id = f"admin:{req.username}"

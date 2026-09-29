@@ -73,10 +73,21 @@ export const getProgress = (campaignId) => api.get(`/emails/progress/${campaignI
 export const verifyCredentials = () => api.post('/emails/verify-credentials')
 
 // ── Reports ───────────────────────────────────────────────────────────────────
-export const getReportUrl = (campaignId, type) => {
-  const token = localStorage.getItem('access_token')
-  const base = import.meta.env.VITE_API_URL || '/api'
-  return `${base}/reports/${campaignId}/download/${type}?token=${token}`
+/**
+ * Download a CSV report. Uses the normal authenticated axios instance (JWT in the
+ * Authorization header) instead of putting the token in the URL.
+ */
+export const downloadReport = async (campaignId, type, baseName = 'campaign') => {
+  const res = await api.get(`/reports/${campaignId}/download/${type}`, { responseType: 'blob' })
+  const safe = String(baseName).replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'campaign'
+  const url = URL.createObjectURL(res.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${safe}_${type}_report.csv`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
 
 // ── Settings ──────────────────────────────────────────────────────────────────

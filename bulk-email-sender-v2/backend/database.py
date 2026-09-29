@@ -29,19 +29,90 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
+#
+# Works with any hosted PostgreSQL (Neon, Supabase, Aiven, Railway, RDS, local).
+# Put the provider's connection string in DATABASE_URL — any of these forms work:
+#   postgres://user:pass@host/db
+#   postgresql://user:pass@host/db?sslmode=require
+#   postgresql+asyncpg://user:pass@host/db
+#
+# asyncpg does NOT understand libpq query params such as `sslmode` and
+# `channel_binding` (providers like Neon add them to their URLs), so we strip
+# them from the URL and translate them into asyncpg `connect_args`.
 
-DATABASE_URL = os.getenv(
+import logging
+from sqlalchemy.engine import make_url
+
+logger = logging.getLogger(__name__)
+
+_RAW_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/emailsender"
+    "postgresql://postgres:postgres@localhost:5432/emailsender",
+).strip()
+
+# Query params that libpq understands but asyncpg rejects
+_LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "sslrootcert", "sslcert", "sslkey", "options"}
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "db", "postgres"}
+
+
+def _build_engine_config(raw_url: str):
+    url = make_url(raw_url)
+
+    # Force the asyncpg driver whatever prefix the provider gave us
+    url = url.set(drivername="postgresql+asyncpg")
+
+    query = dict(url.query)
+    sslmode = str(query.get("sslmode", "")).lower()
+    for key in list(query):
+        if key in _LIBPQ_ONLY_PARAMS:
+            query.pop(key)
+    # Also honour an explicit ?ssl=... if someone already wrote it asyncpg-style
+    ssl_param = str(query.pop("ssl", "")).lower()
+    url = url.set(query=query)
+
+    host = (url.host or "").lower()
+    unix_socket = str(query.get("host", "")).startswith("/")
+    is_local = (not host) or unix_socket or host in _LOCAL_HOSTS or host.endswith(".local")
+
+    connect_args = {}
+
+    # ── SSL ──
+    # Hosted databases require TLS. Local dev databases usually don't.
+    wanted = sslmode or ssl_param
+    if wanted in ("disable", "false", "0"):
+        pass
+    elif wanted in ("verify-ca", "verify-full"):
+        connect_args["ssl"] = wanted
+    elif wanted in ("require", "prefer", "allow", "true", "1"):
+        connect_args["ssl"] = "require"       # encrypted, like libpq sslmode=require
+    elif not is_local:
+        connect_args["ssl"] = "require"       # safe default for any remote host
+
+    # ── PgBouncer / pooled endpoints ──
+    # Transaction-mode poolers (Supabase :6543, Neon "-pooler" hosts) break
+    # asyncpg's prepared-statement cache, so switch it off for them.
+    port = url.port or 5432
+    if "pooler" in host or port == 6543 or os.getenv("DB_USE_POOLER", "").lower() in ("1", "true", "yes"):
+        connect_args["statement_cache_size"] = 0
+        connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid.uuid4()}__"
+
+    # Fail fast instead of hanging forever if the DB is unreachable / waking up
+    connect_args["timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
+
+    return url, connect_args
+
+
+DATABASE_URL, _CONNECT_ARGS = _build_engine_config(_RAW_URL)
+
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    connect_args=_CONNECT_ARGS,
+    pool_pre_ping=True,                                   # drop dead connections silently
+    pool_recycle=int(os.getenv("DB_POOL_RECYCLE", "300")),  # serverless DBs close idle conns
+    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "5")),
 )
-
-# Render/Heroku supply "postgres://" — SQLAlchemy needs the driver spelled out
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-
-engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
@@ -92,7 +163,7 @@ class Campaign(Base):
 
     user    = relationship("User", back_populates="campaigns")
     results = relationship("Result", back_populates="campaign",
-                           cascade="all, delete-orphan", lazy="dynamic")
+                           cascade="all, delete-orphan", passive_deletes=True)
 
 
 # Composite index so per-user queries are fast even with millions of rows
@@ -147,10 +218,34 @@ class UserSettings(Base):
 
 # ── DB Init ───────────────────────────────────────────────────────────────────
 
-async def init_db():
-    """Create all tables (idempotent). Called once at app startup."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+async def init_db(retries: int = 5, delay: float = 3.0):
+    """
+    Create all tables (idempotent). Called once at app startup.
+    Retries because serverless Postgres (e.g. Neon) may need a few seconds
+    to wake up from idle.
+    """
+    import asyncio
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database ready (attempt %d)", attempt)
+            return
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            logger.warning("Database not ready (attempt %d/%d): %s", attempt, retries, e)
+            await asyncio.sleep(delay * attempt)
+    logger.error("Could not connect to the database. Check DATABASE_URL.")
+    raise last_err
+
+
+async def ping() -> bool:
+    """Cheap connectivity check used by /api/health/db."""
+    from sqlalchemy import text
+    async with engine.connect() as conn:
+        await conn.execute(text("SELECT 1"))
+    return True
 
 
 # ── User management ───────────────────────────────────────────────────────────

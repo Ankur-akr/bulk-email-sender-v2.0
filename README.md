@@ -179,7 +179,7 @@ Complete multi-user PostgreSQL architecture.
 
 ## Database
 
-- PostgreSQL (Render)
+- PostgreSQL (any hosted provider — Neon, Supabase, Aiven, …)
 
 ---
 
@@ -282,7 +282,11 @@ JWT_ALGORITHM=HS256
 
 JWT_EXPIRE_HOURS=24
 
-DATABASE_URL=
+ADMIN_USERNAME=
+
+ADMIN_PASSWORD=          # optional; empty disables admin login
+
+DATABASE_URL=            # postgresql://user:pass@host/db?sslmode=require
 
 AWS_ACCESS_KEY_ID=
 
@@ -398,7 +402,21 @@ Backend
 
 Database
 
-- Render PostgreSQL
+- External hosted PostgreSQL (e.g. Neon or Supabase). Render's free Postgres expires, so it is no longer provisioned by `render.yaml`.
+
+### Moving to a new PostgreSQL database
+
+1. Create a Postgres database with any provider and copy its connection string.
+2. In the Render dashboard → your web service → **Environment**, set `DATABASE_URL` to that string
+   (`postgres://…`, `postgresql://…` and `?sslmode=require` are all handled automatically).
+3. Redeploy. Tables are created automatically on startup.
+4. Verify: open `https://<your-service>.onrender.com/api/health/db` — it should return `{"database": "connected"}`.
+
+Notes
+
+- Pooled endpoints (Supabase port `6543`, Neon `-pooler` hosts) are detected automatically.
+- `ADMIN_PASSWORD` has no default any more — leave it unset to disable the admin login.
+- Generate a strong `JWT_SECRET_KEY` (`openssl rand -hex 32`).
 
 Email
 

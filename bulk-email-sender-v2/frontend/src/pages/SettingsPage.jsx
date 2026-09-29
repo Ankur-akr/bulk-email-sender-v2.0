@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 import { getSettings, updateSettings, verifyCredentials } from '../services/api'
+import Spinner from '../components/Spinner'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState({
@@ -20,7 +21,11 @@ export default function SettingsPage() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await updateSettings(settings)
+      await updateSettings({
+        ...settings,
+        delay_between_emails: settings.delay_between_emails === '' ? 0.1 : settings.delay_between_emails,
+        max_retry_count: settings.max_retry_count === '' ? 3 : settings.max_retry_count,
+      })
       toast.success('Settings saved')
     } catch {
       toast.error('Failed to save settings')
@@ -45,21 +50,17 @@ export default function SettingsPage() {
     }
   }
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-    </div>
-  )
+  if (loading) return <Spinner />
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-2xl mx-auto lg:mx-0 space-y-4 sm:space-y-5">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Settings</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">Settings</h1>
         <p className="text-slate-500 text-sm mt-1">Configure your email sending preferences</p>
       </div>
 
       {/* Email Settings */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-5">
         <h2 className="font-semibold text-slate-900">Amazon SES Configuration</h2>
         
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
@@ -101,7 +102,7 @@ export default function SettingsPage() {
           <button
             onClick={handleVerify}
             disabled={verifying}
-            className="flex items-center gap-2 px-4 py-2 border border-blue-300 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-60 transition-colors"
+            className="w-full sm:w-auto justify-center flex items-center gap-2 px-4 py-2.5 border border-blue-300 text-blue-700 text-sm font-medium rounded-lg hover:bg-blue-50 disabled:opacity-60 transition-colors"
           >
             {verifying ? (
               <>
@@ -121,7 +122,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Sending Settings */}
-      <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+      <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-5">
         <h2 className="font-semibold text-slate-900">Sending Configuration</h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -133,7 +134,7 @@ export default function SettingsPage() {
               max={10}
               step={0.05}
               value={settings.delay_between_emails}
-              onChange={e => setSettings({ ...settings, delay_between_emails: parseFloat(e.target.value) })}
+              onChange={e => setSettings({ ...settings, delay_between_emails: e.target.value === '' ? '' : parseFloat(e.target.value) })}
               className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-slate-400 mt-1">Increase to avoid SES rate limits</p>
@@ -146,7 +147,7 @@ export default function SettingsPage() {
               max={10}
               step={1}
               value={settings.max_retry_count}
-              onChange={e => setSettings({ ...settings, max_retry_count: parseInt(e.target.value) })}
+              onChange={e => setSettings({ ...settings, max_retry_count: e.target.value === '' ? '' : parseInt(e.target.value, 10) })}
               className="w-full px-4 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
             <p className="text-xs text-slate-400 mt-1">Retries per failed email</p>
@@ -171,7 +172,7 @@ export default function SettingsPage() {
       <button
         onClick={handleSave}
         disabled={saving}
-        className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
+        className="w-full sm:w-auto justify-center flex items-center gap-2 px-6 py-3 sm:py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
       >
         {saving ? (
           <>

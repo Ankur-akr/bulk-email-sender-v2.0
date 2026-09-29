@@ -3,6 +3,7 @@ Report download routes — streams CSV directly from PostgreSQL.
 JWT accepted as Bearer header OR ?token= query param.
 """
 
+import logging
 from datetime import datetime
 from typing import Optional
 
@@ -14,6 +15,7 @@ from auth_utils import decode_jwt
 import database
 from services.report_service import generate_report_bytes
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
 
@@ -41,11 +43,7 @@ async def download_report(
     report_type: str,
     user=Depends(_get_user),
 ):
-    print("=" * 60)
-    print("DOWNLOAD REQUEST RECEIVED")
-    print("Campaign ID :", campaign_id)
-    print("Report Type :", report_type)
-    print("User ID     :", user["sub"])
+    logger.info("Report download: campaign=%s type=%s", campaign_id, report_type)
 
     if report_type not in ("sent", "failed"):
         raise HTTPException(
@@ -60,13 +58,10 @@ async def download_report(
     )
 
     if not campaign:
-        print("Campaign not found")
         raise HTTPException(
             status_code=404,
             detail="Campaign not found",
         )
-
-    print("Campaign Name:", campaign["name"])
 
     # Generate CSV directly from PostgreSQL
     try:
@@ -76,10 +71,10 @@ async def download_report(
             status_filter=report_type,
         )
     except Exception as e:
-        print("REPORT GENERATION ERROR:", str(e))
+        logger.exception("Report generation failed")
         raise HTTPException(
             status_code=500,
-            detail=f"Report generation failed: {str(e)}",
+            detail="Report generation failed",
         )
 
     if not csv_bytes:
@@ -87,8 +82,6 @@ async def download_report(
             status_code=404,
             detail="Report is empty",
         )
-
-    print("CSV Length:", len(csv_bytes))
 
     safe_name = "".join(
         c if c.isalnum() else "_"
@@ -100,9 +93,6 @@ async def download_report(
         f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_"
         f"{report_type}.csv"
     )
-
-    print("Returning file:", filename)
-    print("=" * 60)
 
     return StreamingResponse(
         iter([csv_bytes]),

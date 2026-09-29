@@ -1,21 +1,37 @@
-databases:
-  - name: emailsender-db
-    databaseName: emailsender
-    user: emailsender
-    plan: free
-
+# Render Blueprint — web service only.
+# The database is NOT provisioned here any more: Render's free Postgres expires,
+# so use an external PostgreSQL (Neon, Supabase, …) and paste its connection
+# string into the DATABASE_URL env var in the Render dashboard.
 services:
   - type: web
     name: bulk-email-sender-api
     runtime: python
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: DATABASE_URL
-        fromDatabase:
-          name: emailsender-db
-          property: connectionString
+        sync: false            # set manually — external PostgreSQL connection string
       - key: JWT_SECRET_KEY
         generateValue: true
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
+      - key: AWS_REGION
+        value: us-east-1
+      - key: SENDER_EMAIL
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false            # leave unset to disable admin login
       - key: ENVIRONMENT
         value: production

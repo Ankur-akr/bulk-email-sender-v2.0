@@ -2,30 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   @apply bg-slate-50 text-slate-900;
+  overflow-x: hidden;           /* never allow sideways page scroll on phones */
 }
 
-.dark body {
-  @apply bg-slate-900 text-slate-100;
+/* iOS Safari zooms the page when a focused input is < 16px — prevent that on phones */
+@media (max-width: 767px) {
+  input, select, textarea {
+    font-size: 16px !important;
+  }
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+/* Toasts: keep them inside the screen on narrow devices */
+@media (max-width: 480px) {
+  .Toastify__toast-container {
+    width: calc(100vw - 1.5rem) !important;
+    left: 0.75rem !important;
+    right: 0.75rem !important;
+    margin: 0 !important;
+    padding-top: env(safe-area-inset-top);
+  }
 }
-::-webkit-scrollbar-track {
-  @apply bg-slate-100;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-slate-300 rounded-full;
+
+/* Custom scrollbar (desktop only — touch devices use overlay scrollbars) */
+@media (hover: hover) {
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { @apply bg-slate-100; }
+  ::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
 }
 
 /* Progress bar animation */
 @keyframes progress-stripe {
-  0% { background-position: 1rem 0; }
+  0%   { background-position: 1rem 0; }
   100% { background-position: 0 0; }
 }
 
@@ -42,19 +57,4 @@ body {
   );
   background-size: 1rem 1rem;
   animation: progress-stripe 1s linear infinite;
-}
-
-/* Quill editor overrides */
-.ql-container {
-  font-family: 'Inter', sans-serif !important;
-  font-size: 14px !important;
-  min-height: 200px;
-}
-
-.ql-toolbar {
-  @apply border-slate-200 rounded-t-lg !important;
-}
-
-.ql-container {
-  @apply border-slate-200 rounded-b-lg !important;
 }

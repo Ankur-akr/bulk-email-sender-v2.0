@@ -4,14 +4,14 @@ Multi-tenant: every request is scoped to the authenticated user via JWT sub.
 """
 import os, logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from database import init_db
+from database import init_db, ping
 from routes import auth, campaigns, contacts, emails, reports, settings
 
 for d in ["reports", "logs", "uploads"]:
@@ -39,6 +39,7 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],   # lets the browser read the CSV filename
 )
 
 app.mount("/reports", StaticFiles(directory="reports"), name="reports")
@@ -53,10 +54,18 @@ app.include_router(settings.router,  prefix="/api/settings",  tags=["settings"])
 
 @app.api_route("/api/health", methods=["GET", "HEAD"])
 async def health():
-    return {
-        "status": "healthy",
-        "version": "3.0.0"
-    }
+    """Lightweight liveness check (also used to wake the Render free web service)."""
+    return {"status": "healthy", "version": "3.0.0"}
+
+
+@app.get("/api/health/db")
+async def health_db():
+    """Verifies the app can actually reach PostgreSQL — use this when debugging DATABASE_URL."""
+    try:
+        await ping()
+        return {"status": "healthy", "database": "connected"}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(status_code=503, detail=f"Database unreachable: {type(e).__name__}")
 
 
 if __name__ == "__main__":

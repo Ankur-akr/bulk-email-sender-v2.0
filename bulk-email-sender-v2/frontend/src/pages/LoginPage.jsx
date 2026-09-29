@@ -90,10 +90,10 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-[100dvh] bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4 py-8">
       <div className="w-full max-w-md">
         {/* Logo */}
-        <div className="text-center mb-8">
+        <div className="text-center mb-6 sm:mb-8">
           <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl shadow-blue-500/30">
             <svg className="w-9 h-9 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -105,7 +105,7 @@ export default function LoginPage() {
         </div>
 
         {/* Card */}
-        <div className="bg-white rounded-2xl shadow-2xl p-8">
+        <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8">
 
           {/* Demo Notice */}
           <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4">
@@ -164,7 +164,7 @@ export default function LoginPage() {
               <button
                 onClick={() => googleSignIn()}
                 disabled={googleLoading}
-                className="w-full flex items-center justify-center gap-3 px-4 py-3 border-2 border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
+                className="w-full flex items-center justify-center gap-3 px-4 py-3.5 border-2 border-slate-200 rounded-xl font-semibold text-slate-700 hover:bg-slate-50 hover:border-slate-300 disabled:opacity-60 disabled:cursor-not-allowed transition-all"
               >
                 {googleLoading ? (
                   <div className="w-5 h-5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
@@ -209,7 +209,7 @@ export default function LoginPage() {
           {!showAdminForm ? (
             <button
               onClick={() => setShowAdminForm(true)}
-              className="w-full py-2.5 text-sm text-slate-500 hover:text-slate-700 transition-colors"
+              className="w-full py-3 text-sm text-slate-500 hover:text-slate-700 transition-colors"
             >
               Sign in with admin credentials →
             </button>
@@ -265,14 +265,14 @@ export default function LoginPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
+                className="w-full py-3 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-60 transition-colors"
               >
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
               <button
                 type="button"
                 onClick={() => setShowAdminForm(false)}
-                className="w-full text-sm text-slate-400 hover:text-slate-600 transition-colors"
+                className="w-full py-2 text-sm text-slate-400 hover:text-slate-600 transition-colors"
               >
                 ← Back
               </button>

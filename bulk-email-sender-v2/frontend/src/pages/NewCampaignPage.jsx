@@ -2,43 +2,50 @@ import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { toast } from 'react-toastify'
-import { uploadCSV, sendEmails, getProgress, getSettings } from '../services/api'
+import { uploadCSV, sendEmails, getProgress, getSettings, downloadReport } from '../services/api'
+import { fillTemplate } from '../utils/template'
 
 // Steps
 const STEPS = ['Upload CSV', 'Compose Email', 'Preview & Send']
 
 function StepIndicator({ current }) {
   return (
-    <div className="flex items-center justify-center gap-0 mb-8">
-      {STEPS.map((label, i) => (
-        <React.Fragment key={i}>
-          <div className="flex items-center gap-2">
-            <div className={`
-              w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all
-              ${i < current ? 'bg-blue-600 text-white' :
-                i === current ? 'bg-blue-600 text-white ring-4 ring-blue-100' :
-                'bg-slate-100 text-slate-400'}
-            `}>
-              {i < current ? (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                </svg>
-              ) : i + 1}
+    <div className="mb-6 sm:mb-8">
+      <div className="flex items-center justify-center">
+        {STEPS.map((label, i) => (
+          <React.Fragment key={i}>
+            <div className="flex items-center gap-2">
+              <div className={`
+                w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all
+                ${i < current ? 'bg-blue-600 text-white' :
+                  i === current ? 'bg-blue-600 text-white ring-4 ring-blue-100' :
+                  'bg-slate-100 text-slate-400'}
+              `}>
+                {i < current ? (
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                  </svg>
+                ) : i + 1}
+              </div>
+              <span className={`text-sm font-medium hidden sm:block ${i === current ? 'text-blue-700' : 'text-slate-500'}`}>
+                {label}
+              </span>
             </div>
-            <span className={`text-sm font-medium hidden sm:block ${i === current ? 'text-blue-700' : 'text-slate-500'}`}>
-              {label}
-            </span>
-          </div>
-          {i < STEPS.length - 1 && (
-            <div className={`flex-1 h-0.5 mx-3 min-w-[2rem] ${i < current ? 'bg-blue-600' : 'bg-slate-200'}`} />
-          )}
-        </React.Fragment>
-      ))}
+            {i < STEPS.length - 1 && (
+              <div className={`flex-1 h-0.5 mx-2 sm:mx-3 min-w-[1.5rem] ${i < current ? 'bg-blue-600' : 'bg-slate-200'}`} />
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+      {/* Mobile: only the current step's name fits, so show it underneath */}
+      <p className="sm:hidden text-center text-sm font-medium text-blue-700 mt-3">
+        Step {current + 1} of {STEPS.length}: {STEPS[current]}
+      </p>
     </div>
   )
 }
 
-function ProgressPanel({ campaignId, onDone }) {
+function ProgressPanel({ campaignId, onDone, onFailed }) {
   const [progress, setProgress] = useState({ total: 0, sent: 0, failed: 0, pending: 0, percentage: 0, status: 'sending' })
   const intervalRef = useRef(null)
 
@@ -50,6 +57,9 @@ function ProgressPanel({ campaignId, onDone }) {
         if (res.data.status === 'completed') {
           clearInterval(intervalRef.current)
           onDone(res.data)
+        } else if (res.data.status === 'failed') {
+          clearInterval(intervalRef.current)
+          onFailed?.(res.data)
         }
       } catch (_) {}
     }
@@ -61,28 +71,34 @@ function ProgressPanel({ campaignId, onDone }) {
   const pct = Math.round(progress.percentage || 0)
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+    <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-5">
       <div className="flex items-center gap-3">
-        {progress.status !== 'completed' ? (
-          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center">
+        {progress.status === 'failed' ? (
+          <div className="w-10 h-10 bg-red-50 rounded-full flex items-center justify-center shrink-0">
+            <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+        ) : progress.status !== 'completed' ? (
+          <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center shrink-0">
             <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
           </div>
         ) : (
-          <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center">
+          <div className="w-10 h-10 bg-green-50 rounded-full flex items-center justify-center shrink-0">
             <svg className="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
         )}
-        <div>
+        <div className="min-w-0">
           <h3 className="font-semibold text-slate-900">
-            {progress.status === 'completed' ? 'Campaign Complete!' : 'Sending emails...'}
+            {progress.status === 'completed' ? 'Campaign Complete!' : progress.status === 'failed' ? 'Campaign failed' : 'Sending emails...'}
           </h3>
           {progress.current_email && progress.status !== 'completed' && (
-            <p className="text-xs text-slate-400 mt-0.5">Sending to: {progress.current_email}</p>
+            <p className="text-xs text-slate-400 mt-0.5 truncate">Sending to: {progress.current_email}</p>
           )}
         </div>
-        <span className="ml-auto text-2xl font-bold text-blue-600">{pct}%</span>
+        <span className="ml-auto pl-2 text-xl sm:text-2xl font-bold text-blue-600">{pct}%</span>
       </div>
 
       {/* Progress bar */}
@@ -96,7 +112,7 @@ function ProgressPanel({ campaignId, onDone }) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Total', value: progress.total, color: 'text-slate-700' },
           { label: 'Sent', value: progress.sent, color: 'text-green-600' },
@@ -158,7 +174,11 @@ export default function NewCampaignPage() {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: { 'text/csv': ['.csv'] },
+    accept: {
+      'text/csv': ['.csv'],
+      'application/vnd.ms-excel': ['.csv'],   // what Windows/Android report for .csv
+      'text/plain': ['.csv'],
+    },
     maxFiles: 1
   })
 
@@ -187,6 +207,11 @@ export default function NewCampaignPage() {
     }
   }
 
+  const handleReport = async (type) => {
+    try { await downloadReport(campaignId, type, campaignName) }
+    catch { toast.error('Failed to download report. Please try again.') }
+  }
+
   const PLACEHOLDER_EXAMPLE = `Dear {name},
 
 Welcome! We're excited to reach you at {email}.
@@ -195,9 +220,9 @@ Best regards,
 Your Team`
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-3xl mx-auto space-y-5 sm:space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">New Campaign</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-slate-900">New Campaign</h1>
         <p className="text-slate-500 text-sm mt-1">Upload contacts and compose your personalized email</p>
       </div>
 
@@ -205,7 +230,7 @@ Your Team`
 
       {/* STEP 0: Upload CSV */}
       {step === 0 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-5">
           <h2 className="font-semibold text-slate-900">Upload Contact List</h2>
           <p className="text-sm text-slate-500">
             Upload a CSV file with <code className="bg-slate-100 px-1 rounded text-xs">Name</code> and{' '}
@@ -216,7 +241,7 @@ Your Team`
           <div
             {...getRootProps()}
             className={`
-              border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-all
+              border-2 border-dashed rounded-xl p-6 sm:p-10 text-center cursor-pointer transition-all
               ${isDragActive ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50'}
             `}
           >
@@ -231,8 +256,11 @@ Your Team`
               <p className="text-blue-600 font-medium">Drop your CSV here</p>
             ) : (
               <>
-                <p className="text-slate-700 font-medium">Drag & drop your CSV file</p>
-                <p className="text-slate-400 text-sm mt-1">or click to browse</p>
+                <p className="text-slate-700 font-medium">
+                  <span className="hidden sm:inline">Drag & drop your CSV file</span>
+                  <span className="sm:hidden">Tap to choose a CSV file</span>
+                </p>
+                <p className="text-slate-400 text-sm mt-1 hidden sm:block">or click to browse</p>
               </>
             )}
           </div>
@@ -299,7 +327,7 @@ Bob,bob@example.com`}
             <button
               disabled={!csvData || csvData.valid_count === 0}
               onClick={() => setStep(1)}
-              className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 sm:flex-none px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Continue →
             </button>
@@ -309,7 +337,7 @@ Bob,bob@example.com`}
 
       {/* STEP 1: Compose */}
       {step === 1 && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-5">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-5">
           <h2 className="font-semibold text-slate-900">Compose Email</h2>
 
           <div className="grid grid-cols-1 gap-4">
@@ -342,15 +370,19 @@ Bob,bob@example.com`}
                 <label className="text-sm font-medium text-slate-700">
                   Message Body <span className="text-red-500">*</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer">
+                <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">HTML mode</span>
-                  <div
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={useHtml}
+                    aria-label="HTML mode"
                     onClick={() => setUseHtml(!useHtml)}
-                    className={`relative w-10 h-5 rounded-full transition-colors ${useHtml ? 'bg-blue-500' : 'bg-slate-300'}`}
+                    className={`relative w-11 h-6 rounded-full transition-colors ${useHtml ? 'bg-blue-500' : 'bg-slate-300'}`}
                   >
-                    <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${useHtml ? 'translate-x-5' : 'translate-x-0.5'}`} />
-                  </div>
-                </label>
+                    <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${useHtml ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
               </div>
               <textarea
                 value={bodyText}
@@ -386,14 +418,14 @@ Bob,bob@example.com`}
             </div>
           </div>
 
-          <div className="flex justify-between">
-            <button onClick={() => setStep(0)} className="px-5 py-2 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 transition-colors">
+          <div className="flex justify-between gap-3">
+            <button onClick={() => setStep(0)} className="px-5 py-2.5 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 transition-colors">
               ← Back
             </button>
             <button
               disabled={!campaignName || !subject || !bodyText}
               onClick={() => setStep(2)}
-              className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="flex-1 sm:flex-none px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               Continue →
             </button>
@@ -406,7 +438,7 @@ Bob,bob@example.com`}
         <div className="space-y-4">
           {/* Campaign summary */}
           {!campaignId && (
-            <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+            <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 space-y-4">
               <h2 className="font-semibold text-slate-900">Preview & Send</h2>
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div className="bg-slate-50 rounded-lg p-3">
@@ -427,25 +459,22 @@ Bob,bob@example.com`}
               <div>
                 <p className="text-sm font-medium text-slate-700 mb-2">Email preview (first contact):</p>
                 <div className="border border-slate-200 rounded-lg p-4 bg-slate-50">
-                  <p className="text-xs text-slate-500 mb-1">Subject: {subject.replace('{name}', csvData?.contacts[0]?.name || '').replace('{email}', csvData?.contacts[0]?.email || '')}</p>
+                  <p className="text-xs text-slate-500 mb-1">Subject: {fillTemplate(subject, csvData?.contacts[0])}</p>
                   <hr className="border-slate-200 my-2" />
-                  <pre className="text-sm text-slate-700 whitespace-pre-wrap font-sans leading-relaxed">
-                    {bodyText
-                      .replace('{name}', csvData?.contacts[0]?.name || '')
-                      .replace('{email}', csvData?.contacts[0]?.email || '')
-                    }
+                  <pre className="text-sm text-slate-700 whitespace-pre-wrap break-words font-sans leading-relaxed">
+                    {fillTemplate(bodyText, csvData?.contacts[0])}
                   </pre>
                 </div>
               </div>
 
-              <div className="flex justify-between">
-                <button onClick={() => setStep(1)} className="px-5 py-2 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 transition-colors">
+              <div className="flex justify-between gap-3">
+                <button onClick={() => setStep(1)} className="px-5 py-2.5 text-slate-600 text-sm font-medium rounded-lg hover:bg-slate-100 transition-colors">
                   ← Back
                 </button>
                 <button
                   onClick={handleSend}
                   disabled={sending}
-                  className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                  className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-6 py-2.5 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
                 >
                   {sending ? (
                     <>
@@ -469,6 +498,7 @@ Bob,bob@example.com`}
           {campaignId && (
             <ProgressPanel
               campaignId={campaignId}
+              onFailed={() => toast.error('Campaign failed. Check the campaign page for details.')}
               onDone={(finalStats) => {
                 setDone(true)
                 toast.success(`Campaign complete! ${finalStats.sent} sent, ${finalStats.failed} failed.`)
@@ -478,28 +508,24 @@ Bob,bob@example.com`}
 
           {/* Done actions */}
           {done && (
-            <div className="bg-green-50 border border-green-200 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <div className="bg-green-50 border border-green-200 rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-0 sm:flex sm:items-center sm:justify-between sm:gap-4">
               <p className="text-green-800 font-medium">Campaign finished!</p>
-              <div className="flex gap-3">
-                <a
-                  href={`/api/reports/${campaignId}/download/sent`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
+              <div className="grid grid-cols-1 sm:flex gap-2 sm:gap-3">
+                <button
+                  onClick={() => handleReport('sent')}
+                  className="px-4 py-2.5 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 transition-colors"
                 >
                   Download Sent Report
-                </a>
-                <a
-                  href={`/api/reports/${campaignId}/download/failed`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-4 py-2 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
+                </button>
+                <button
+                  onClick={() => handleReport('failed')}
+                  className="px-4 py-2.5 bg-red-500 text-white text-sm font-medium rounded-lg hover:bg-red-600 transition-colors"
                 >
                   Download Failed Report
-                </a>
+                </button>
                 <button
                   onClick={() => navigate(`/campaigns/${campaignId}`)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
+                  className="px-4 py-2.5 border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-white transition-colors"
                 >
                   View Details
                 </button>

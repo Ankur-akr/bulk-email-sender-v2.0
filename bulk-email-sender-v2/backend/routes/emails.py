@@ -55,7 +55,10 @@ async def _send_campaign(campaign_id: str, user_id: str, req: SendEmailRequest):
             email = contact.get("email", "")
             progress_store[campaign_id]["current_email"] = email
 
-            result = ses_service.send_email(
+            # boto3 is blocking (and retries use time.sleep) — run it in a worker
+            # thread so the API stays responsive while a campaign is sending.
+            result = await asyncio.to_thread(
+                ses_service.send_email,
                 to_email=email, to_name=name,
                 subject=_replace(req.subject, contact),
                 body_text=_replace(req.body, contact),
@@ -81,12 +84,16 @@ async def _send_campaign(campaign_id: str, user_id: str, req: SendEmailRequest):
         await database.update_campaign(campaign_id, user_id, {"status": "completed"})
         progress_store[campaign_id]["status"] = "completed"
 
-        from services.report_service import generate_reports
-        await generate_reports(campaign_id, user_id)
+        # Finished — the DB is now the source of truth, drop the in-memory entry
+        # after clients have had time to read the final "completed" state.
+        await asyncio.sleep(10)
+        progress_store.pop(campaign_id, None)
 
     except Exception:
         await database.update_campaign(campaign_id, user_id, {"status": "failed"})
-        progress_store[campaign_id]["status"] = "failed"
+        progress_store.setdefault(campaign_id, {
+            "total": len(req.contacts), "sent": 0, "failed": 0, "current_email": "",
+        })["status"] = "failed"
         raise
 
 
@@ -111,7 +118,11 @@ async def send_emails(
 
 @router.get("/progress/{campaign_id}")
 async def get_progress(campaign_id: str, user=Depends(get_current_user)):
-    # Verify ownership before returning progress
+    # Verify ownership first — progress_store is keyed only by campaign id
+    owned = await database.get_campaign(campaign_id, user_id=user["sub"])
+    if not owned:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+
     prog = progress_store.get(campaign_id)
     if prog:
         total = prog["total"]
@@ -124,9 +135,7 @@ async def get_progress(campaign_id: str, user=Depends(get_current_user)):
             "current_email": prog.get("current_email", ""),
         }
 
-    c = await database.get_campaign(campaign_id, user_id=user["sub"])
-    if not c:
-        raise HTTPException(status_code=404, detail="Campaign not found")
+    c = owned
     stats = c["stats"]
     done  = stats["sent"] + stats["failed"]
     return {
