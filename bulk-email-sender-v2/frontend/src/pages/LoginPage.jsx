@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { useGoogleLogin } from '@react-oauth/google'
 import { toast } from 'react-toastify'
 import { useAuth } from '../hooks/useAuth'
-import { useTheme } from '../hooks/useTheme'
 import { googleLogin, adminLogin, getGoogleClientId } from '../services/api'
 
 export default function LoginPage() {
@@ -16,7 +15,6 @@ export default function LoginPage() {
   const [hasGoogleAuth, setHasGoogleAuth] = useState(false)
   const [checkingGoogle, setCheckingGoogle] = useState(true)
   const { setAuth, user } = useAuth()
-  const { isDark, toggleTheme } = useTheme()
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -108,19 +106,7 @@ export default function LoginPage() {
 
         {/* Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 relative">
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="absolute top-4 right-4 p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
-            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
-            title={isDark ? 'Light mode' : 'Dark mode'}
-          >
-            {isDark ? (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v2m0 14v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M3 12h2m14 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-            ) : (
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
-            )}
-          </button>
+
 
           {/* Demo Notice */}
           <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4">

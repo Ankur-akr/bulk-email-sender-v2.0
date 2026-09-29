@@ -4,7 +4,6 @@ import { ToastContainer } from 'react-toastify'
 import 'react-toastify/dist/ReactToastify.css'
 
 import { AuthProvider, useAuth } from './hooks/useAuth'
-import { ThemeProvider } from './hooks/useTheme'
 import Layout from './components/Layout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
@@ -70,7 +69,6 @@ function ProtectedRoute({ children }) {
 function App() {
   return (
     <BrowserRouter>
-      <ThemeProvider>
         <AppErrorBoundary>
           <AuthProvider>
             <Routes>
@@ -90,7 +88,6 @@ function App() {
             <ToastContainer position="top-center" autoClose={4000} newestOnTop limit={3} />
           </AuthProvider>
         </AppErrorBoundary>
-      </ThemeProvider>
     </BrowserRouter>
   )
 }
