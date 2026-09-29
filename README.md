@@ -484,3 +484,27 @@ please ⭐ Star the repository on GitHub.
 # 📄 License
 
 This project is licensed under the MIT License.
+
+## Production deployment notes (updated)
+
+### PostgreSQL / PgBouncer
+The backend uses **Psycopg 3** through SQLAlchemy (`postgresql+psycopg`) with `prepare_threshold=None`. This is intentional: transaction/statement-pooling PgBouncer deployments can invalidate asyncpg prepared statements and cause `InvalidSQLStatementNameError`. Do not switch the driver back to `asyncpg` for this deployment.
+
+### Backend environment
+Set these variables in Render (or your backend host):
+
+- `DATABASE_URL` — PostgreSQL connection string, including `sslmode=require` when supplied by your provider.
+- `JWT_SECRET_KEY`
+- `GOOGLE_CLIENT_ID`
+- `FRONTEND_URL` — your Vercel origin, for example `https://mail.ankurrai.in`. Multiple origins may be comma-separated.
+- AWS SES variables required by your deployment.
+
+### Frontend environment
+Set in Vercel:
+
+- `VITE_API_URL=https://<your-render-service>.onrender.com/api`
+- `VITE_GOOGLE_CLIENT_ID=<your-google-client-id>`
+
+### UI
+The application now includes a persistent light/dark theme toggle. The selected theme is stored locally and follows the system preference on first visit. A React error boundary also replaces a blank-screen failure with a recovery screen.
+

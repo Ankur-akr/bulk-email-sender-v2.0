@@ -33,13 +33,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Bulk Email Sender API", version="3.0.0", lifespan=lifespan)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+# Support one or more comma-separated frontend origins. Never use a wildcard
+# here: an explicit allow-list makes production CORS predictable and safer.
+ALLOWED_ORIGINS = [
+    origin.strip().rstrip("/")
+    for origin in FRONTEND_URL.split(",")
+    if origin.strip()
+]
+if "http://localhost:3000" not in ALLOWED_ORIGINS:
+    ALLOWED_ORIGINS.append("http://localhost:3000")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition"],   # lets the browser read the CSV filename
+    expose_headers=["Content-Disposition"],
 )
 
 app.mount("/reports", StaticFiles(directory="reports"), name="reports")

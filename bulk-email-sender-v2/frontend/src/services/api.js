@@ -6,11 +6,12 @@ import axios from 'axios'
 import { toast } from 'react-toastify'
 
 // In production this points to your Render backend URL
-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
+const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
 const api = axios.create({
   baseURL: BASE_URL,
   withCredentials: false,   // JWT in header, not cookie
+  timeout: 30000,
 })
 
 // Attach JWT token to every request

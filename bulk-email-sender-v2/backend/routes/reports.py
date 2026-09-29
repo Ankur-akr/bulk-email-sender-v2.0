@@ -1,6 +1,6 @@
 """
 Report download routes — streams CSV directly from PostgreSQL.
-JWT accepted as Bearer header OR ?token= query param.
+JWT is accepted through the Authorization Bearer header.
 """
 
 import logging

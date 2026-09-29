@@ -1,0 +1,583 @@
+diff --git a/README.md b/README.md
+index d0e5990a2ee4a32e17786ca0ff460bf34e23d584..014ab749a0e6debfa6e9030d4486648fbb2f3554 100644
+--- a/README.md
++++ b/README.md
+@@ -483,4 +483,28 @@ please ⭐ Star the repository on GitHub.
+ 
+ # 📄 License
+ 
+-This project is licensed under the MIT License.
+\ No newline at end of file
++This project is licensed under the MIT License.
++
++## Production deployment notes (updated)
++
++### PostgreSQL / PgBouncer
++The backend uses **Psycopg 3** through SQLAlchemy (`postgresql+psycopg`) with `prepare_threshold=None`. This is intentional: transaction/statement-pooling PgBouncer deployments can invalidate asyncpg prepared statements and cause `InvalidSQLStatementNameError`. Do not switch the driver back to `asyncpg` for this deployment.
++
++### Backend environment
++Set these variables in Render (or your backend host):
++
++- `DATABASE_URL` — PostgreSQL connection string, including `sslmode=require` when supplied by your provider.
++- `JWT_SECRET_KEY`
++- `GOOGLE_CLIENT_ID`
++- `FRONTEND_URL` — your Vercel origin, for example `https://mail.ankurrai.in`. Multiple origins may be comma-separated.
++- AWS SES variables required by your deployment.
++
++### Frontend environment
++Set in Vercel:
++
++- `VITE_API_URL=https://<your-render-service>.onrender.com/api`
++- `VITE_GOOGLE_CLIENT_ID=<your-google-client-id>`
++
++### UI
++The application now includes a persistent light/dark theme toggle. The selected theme is stored locally and follows the system preference on first visit. A React error boundary also replaces a blank-screen failure with a recovery screen.
++
+diff --git a/bulk-email-sender-v2/backend/.env.example b/bulk-email-sender-v2/backend/.env.example
+index af917c0d8d4e3a9889fe4e3fbf53f76833876fb4..18e086d4e8b0a0bbecd0c05cba0e888d6c34418f 100644
+--- a/bulk-email-sender-v2/backend/.env.example
++++ b/bulk-email-sender-v2/backend/.env.example
+@@ -6,6 +6,7 @@
+ #   Local:    postgresql://postgres:postgres@localhost:5432/emailsender
+ DATABASE_URL=postgresql://user:password@host:5432/dbname
+ # Optional tuning (defaults are fine): DB_POOL_SIZE=5  DB_POOL_RECYCLE=300  DB_CONNECT_TIMEOUT=30
++# Psycopg 3 is used with prepared statements disabled for PgBouncer compatibility.
+ 
+ # ── AWS SES ───────────────────────────────────────────────────────────────────
+ AWS_ACCESS_KEY_ID=your_key
+diff --git a/bulk-email-sender-v2/backend/app.py b/bulk-email-sender-v2/backend/app.py
+index 22af34f8b1e197d6b26f064f37ddf54900d77825..b57c366031f28ea54900ac197e09e4c6b7dc3fef 100644
+--- a/bulk-email-sender-v2/backend/app.py
++++ b/bulk-email-sender-v2/backend/app.py
+@@ -33,13 +33,23 @@ async def lifespan(app: FastAPI):
+ app = FastAPI(title="Bulk Email Sender API", version="3.0.0", lifespan=lifespan)
+ 
+ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
++# Support one or more comma-separated frontend origins. Never use a wildcard
++# here: an explicit allow-list makes production CORS predictable and safer.
++ALLOWED_ORIGINS = [
++    origin.strip().rstrip("/")
++    for origin in FRONTEND_URL.split(",")
++    if origin.strip()
++]
++if "http://localhost:3000" not in ALLOWED_ORIGINS:
++    ALLOWED_ORIGINS.append("http://localhost:3000")
++
+ app.add_middleware(
+     CORSMiddleware,
+-    allow_origins=["*"],
++    allow_origins=ALLOWED_ORIGINS,
+     allow_credentials=False,
+     allow_methods=["*"],
+     allow_headers=["*"],
+-    expose_headers=["Content-Disposition"],   # lets the browser read the CSV filename
++    expose_headers=["Content-Disposition"],
+ )
+ 
+ app.mount("/reports", StaticFiles(directory="reports"), name="reports")
+diff --git a/bulk-email-sender-v2/backend/database.py b/bulk-email-sender-v2/backend/database.py
+index 990fc1ca2cb2dbb31b213c84331216c075e3fb11..150e3cf1d65acb6dbac17ac44209d17f59e6fd60 100644
+--- a/bulk-email-sender-v2/backend/database.py
++++ b/bulk-email-sender-v2/backend/database.py
+@@ -34,11 +34,10 @@ from sqlalchemy.orm import DeclarativeBase, relationship
+ # Put the provider's connection string in DATABASE_URL — any of these forms work:
+ #   postgres://user:pass@host/db
+ #   postgresql://user:pass@host/db?sslmode=require
+-#   postgresql+asyncpg://user:pass@host/db
++#   postgresql://user:pass@host/db?sslmode=require
++#   postgresql+psycopg://user:pass@host/db
+ #
+-# asyncpg does NOT understand libpq query params such as `sslmode` and
+-# `channel_binding` (providers like Neon add them to their URLs), so we strip
+-# them from the URL and translate them into asyncpg `connect_args`.
++# Psycopg 3/libpq accepts standard PostgreSQL URL parameters directly.
+ 
+ import logging
+ from sqlalchemy.engine import make_url
+@@ -50,57 +49,35 @@ _RAW_URL = os.getenv(
+     "postgresql://postgres:postgres@localhost:5432/emailsender",
+ ).strip()
+ 
+-# Query params that libpq understands but asyncpg rejects
+-_LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "sslrootcert", "sslcert", "sslkey", "options"}
+ _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "db", "postgres"}
+ 
+ 
+ def _build_engine_config(raw_url: str):
++    """Build a SQLAlchemy async engine configuration that is safe with PgBouncer.
++
++    Psycopg 3 is used instead of asyncpg because SQLAlchemy's asyncpg dialect
++    relies on prepared statements internally. Transaction/statement-pooling
++    PgBouncer deployments can invalidate those statements between requests.
++    Psycopg lets us explicitly disable automatic prepared statements with
++    ``prepare_threshold=None``.
++    """
+     url = make_url(raw_url)
++    url = url.set(drivername="postgresql+psycopg")
+ 
+-    # Force the asyncpg driver whatever prefix the provider gave us
+-    url = url.set(drivername="postgresql+asyncpg")
++    host = (url.host or "").lower()
++    is_local = (not host) or host in _LOCAL_HOSTS or host.endswith(".local")
+ 
+-    query = dict(url.query)
+-    sslmode = str(query.get("sslmode", "")).lower()
+-    for key in list(query):
+-        if key in _LIBPQ_ONLY_PARAMS:
+-            query.pop(key)
+-    # Also honour an explicit ?ssl=... if someone already wrote it asyncpg-style
+-    ssl_param = str(query.pop("ssl", "")).lower()
+-    url = url.set(query=query)
++    connect_args = {
++        # Critical for PgBouncer transaction/statement pooling.
++        "prepare_threshold": None,
++        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "30")),
++    }
+ 
+-    host = (url.host or "").lower()
+-    unix_socket = str(query.get("host", "")).startswith("/")
+-    is_local = (not host) or unix_socket or host in _LOCAL_HOSTS or host.endswith(".local")
+-
+-    connect_args = {}
+-
+-    # ── SSL ──
+-    # Hosted databases require TLS. Local dev databases usually don't.
+-    wanted = sslmode or ssl_param
+-    if wanted in ("disable", "false", "0"):
+-        pass
+-    elif wanted in ("verify-ca", "verify-full"):
+-        connect_args["ssl"] = wanted
+-    elif wanted in ("require", "prefer", "allow", "true", "1"):
+-        connect_args["ssl"] = "require"       # encrypted, like libpq sslmode=require
+-    elif not is_local:
+-        connect_args["ssl"] = "require"       # safe default for any remote host
+-
+-    # ── PgBouncer / prepared-statement compatibility ──
+-    # The deployed PostgreSQL connection is using PgBouncer transaction/statement
+-    # pooling. asyncpg prepared statements can become invalid when a pooled
+-    # connection is switched between backend PostgreSQL connections.
+-    #
+-    # Disable asyncpg's statement cache and generate a unique prepared-statement
+-    # name for every statement. This is safe for both pooled and direct
+-    # PostgreSQL connections and avoids relying on hostname/port detection.
+-    connect_args["statement_cache_size"] = 0
+-    connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid.uuid4()}__"
+-
+-    # Fail fast instead of hanging forever if the DB is unreachable / waking up
+-    connect_args["timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
++    # psycopg/libpq understands sslmode directly from DATABASE_URL. For URLs
++    # that omit it, require TLS for hosted databases while keeping local dev
++    # connections simple.
++    if not is_local and "sslmode" not in url.query:
++        connect_args["sslmode"] = "require"
+ 
+     return url, connect_args
+ 
+diff --git a/bulk-email-sender-v2/backend/requirements.txt b/bulk-email-sender-v2/backend/requirements.txt
+index a61a019065015e5f1587d43fd873a331ce693e5c..856197c90f0df1c3aac2aabeb933f04955e72b28 100644
+--- a/bulk-email-sender-v2/backend/requirements.txt
++++ b/bulk-email-sender-v2/backend/requirements.txt
+@@ -9,4 +9,4 @@ aiofiles==23.2.1
+ httpx==0.27.0
+ python-jose[cryptography]==3.3.0
+ sqlalchemy==2.0.29
+-asyncpg==0.29.0
++psycopg[binary]==3.2.10
+diff --git a/bulk-email-sender-v2/backend/routes/reports.py b/bulk-email-sender-v2/backend/routes/reports.py
+index 9a67a1ef887c19411e419892d331327769ccb460..db9fc9020d0739b17aee00ac2550176dbdcc04d9 100644
+--- a/bulk-email-sender-v2/backend/routes/reports.py
++++ b/bulk-email-sender-v2/backend/routes/reports.py
+@@ -1,6 +1,6 @@
+ """
+ Report download routes — streams CSV directly from PostgreSQL.
+-JWT accepted as Bearer header OR ?token= query param.
++JWT is accepted through the Authorization Bearer header.
+ """
+ 
+ import logging
+diff --git a/bulk-email-sender-v2/frontend/index.html b/bulk-email-sender-v2/frontend/index.html
+index f95abe84e24c517fa417fbb8d9a7305cd2130300..ef189a92ea92fd3c6f9e73d543fd29be7fcbdd33 100644
+--- a/bulk-email-sender-v2/frontend/index.html
++++ b/bulk-email-sender-v2/frontend/index.html
+@@ -5,6 +5,8 @@
+     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+     <meta name="theme-color" content="#2563eb" />
+     <link rel="icon" type="image/png" sizes="64x64" href="/favicon.png" />
++    <meta name="theme-color" content="#0f172a" />
++    <meta name="description" content="Bulk Email Sender — personalized email campaign management" />
+     <title>Bulk Email Sender</title>
+     <link rel="preconnect" href="https://fonts.googleapis.com">
+     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+diff --git a/bulk-email-sender-v2/frontend/src/App.jsx b/bulk-email-sender-v2/frontend/src/App.jsx
+index 2be5d6c63b7d7bba968a0fca60e6170e1d48e9f4..008d181ec23e8432ee67c71b02926cd70c0599d0 100644
+--- a/bulk-email-sender-v2/frontend/src/App.jsx
++++ b/bulk-email-sender-v2/frontend/src/App.jsx
+@@ -4,6 +4,7 @@ import { ToastContainer } from 'react-toastify'
+ import 'react-toastify/dist/ReactToastify.css'
+ 
+ import { AuthProvider, useAuth } from './hooks/useAuth'
++import { ThemeProvider } from './hooks/useTheme'
+ import Layout from './components/Layout'
+ import LoginPage from './pages/LoginPage'
+ import DashboardPage from './pages/DashboardPage'
+@@ -12,6 +13,45 @@ import CampaignsPage from './pages/CampaignsPage'
+ import CampaignDetailPage from './pages/CampaignDetailPage'
+ import SettingsPage from './pages/SettingsPage'
+ 
++
++class AppErrorBoundary extends React.Component {
++  constructor(props) {
++    super(props)
++    this.state = { hasError: false, message: '' }
++  }
++
++  static getDerivedStateFromError(error) {
++    return { hasError: true, message: error?.message || 'Unexpected application error' }
++  }
++
++  componentDidCatch(error, info) {
++    console.error('UI render error:', error, info)
++  }
++
++  render() {
++    if (!this.state.hasError) return this.props.children
++    return (
++      <div className="min-h-[100dvh] flex items-center justify-center bg-slate-50 px-4">
++        <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 sm:p-8 text-center shadow-lg">
++          <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-50 text-red-600">
++            <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
++          </div>
++          <h1 className="text-lg font-semibold text-slate-900">Something went wrong</h1>
++          <p className="mt-2 text-sm text-slate-500">The page encountered an unexpected error. Reload the application to continue.</p>
++          <button
++            type="button"
++            onClick={() => window.location.reload()}
++            className="mt-5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
++          >
++            Reload application
++          </button>
++          {this.state.message && <p className="mt-3 text-[11px] text-slate-400 break-words">{this.state.message}</p>}
++        </div>
++      </div>
++    )
++  }
++}
++
+ function ProtectedRoute({ children }) {
+   const { user, loading } = useAuth()
+   if (loading) {
+@@ -30,23 +70,27 @@ function ProtectedRoute({ children }) {
+ function App() {
+   return (
+     <BrowserRouter>
+-      <AuthProvider>
+-        <Routes>
+-          <Route path="/login" element={<LoginPage />} />
+-          <Route
+-            path="/"
+-            element={<ProtectedRoute><Layout /></ProtectedRoute>}
+-          >
+-            <Route index element={<Navigate to="/dashboard" replace />} />
+-            <Route path="dashboard" element={<DashboardPage />} />
+-            <Route path="campaigns" element={<CampaignsPage />} />
+-            <Route path="campaigns/:id" element={<CampaignDetailPage />} />
+-            <Route path="new-campaign" element={<NewCampaignPage />} />
+-            <Route path="settings" element={<SettingsPage />} />
+-          </Route>
+-        </Routes>
+-        <ToastContainer position="top-center" autoClose={4000} newestOnTop limit={3} />
+-      </AuthProvider>
++      <ThemeProvider>
++        <AppErrorBoundary>
++          <AuthProvider>
++            <Routes>
++              <Route path="/login" element={<LoginPage />} />
++              <Route
++                path="/"
++                element={<ProtectedRoute><Layout /></ProtectedRoute>}
++              >
++                <Route index element={<Navigate to="/dashboard" replace />} />
++                <Route path="dashboard" element={<DashboardPage />} />
++                <Route path="campaigns" element={<CampaignsPage />} />
++                <Route path="campaigns/:id" element={<CampaignDetailPage />} />
++                <Route path="new-campaign" element={<NewCampaignPage />} />
++                <Route path="settings" element={<SettingsPage />} />
++              </Route>
++            </Routes>
++            <ToastContainer position="top-center" autoClose={4000} newestOnTop limit={3} />
++          </AuthProvider>
++        </AppErrorBoundary>
++      </ThemeProvider>
+     </BrowserRouter>
+   )
+ }
+diff --git a/bulk-email-sender-v2/frontend/src/components/Layout.jsx b/bulk-email-sender-v2/frontend/src/components/Layout.jsx
+index 5ec87aa2973c89aff17b88bd2135e61e672fa1cd..363e1106fdfcdaa80b0f24415513f69f3fdb0e7f 100644
+--- a/bulk-email-sender-v2/frontend/src/components/Layout.jsx
++++ b/bulk-email-sender-v2/frontend/src/components/Layout.jsx
+@@ -1,6 +1,7 @@
+ import React, { useState, useEffect } from 'react'
+ import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
+ import { useAuth } from '../hooks/useAuth'
++import { useTheme } from '../hooks/useTheme'
+ import { toast } from 'react-toastify'
+ 
+ const icon = (d) => (
+@@ -29,6 +30,7 @@ function Avatar({ user }) {
+ 
+ export default function Layout() {
+   const { user, logout } = useAuth()
++  const { isDark, toggleTheme } = useTheme()
+   const navigate = useNavigate()
+   const location = useLocation()
+   const [sidebarOpen, setSidebarOpen] = useState(false)
+@@ -132,6 +134,19 @@ export default function Layout() {
+           </button>
+           <img src="/logo.png" alt="" className="h-8 w-auto lg:hidden" />
+           <div className="flex-1" />
++          <button
++            type="button"
++            onClick={toggleTheme}
++            className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
++            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
++            title={isDark ? 'Light mode' : 'Dark mode'}
++          >
++            {isDark ? (
++              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v2m0 14v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M3 12h2m14 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
++            ) : (
++              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
++            )}
++          </button>
+           <NavLink
+             to="/new-campaign"
+             className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors"
+diff --git a/bulk-email-sender-v2/frontend/src/hooks/useTheme.jsx b/bulk-email-sender-v2/frontend/src/hooks/useTheme.jsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..b1d75e02b170b147e0958a7fd6281dbfc503925c
+--- /dev/null
++++ b/bulk-email-sender-v2/frontend/src/hooks/useTheme.jsx
+@@ -0,0 +1,43 @@
++import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
++
++const ThemeContext = createContext(null)
++const STORAGE_KEY = 'theme'
++
++function getInitialTheme() {
++  const saved = localStorage.getItem(STORAGE_KEY)
++  if (saved === 'light' || saved === 'dark') return saved
++  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
++}
++
++export function ThemeProvider({ children }) {
++  const [theme, setTheme] = useState(getInitialTheme)
++
++  useEffect(() => {
++    const root = document.documentElement
++    root.classList.toggle('dark', theme === 'dark')
++    root.dataset.theme = theme
++    root.style.colorScheme = theme
++    localStorage.setItem(STORAGE_KEY, theme)
++  }, [theme])
++
++  useEffect(() => {
++    const media = window.matchMedia?.('(prefers-color-scheme: dark)')
++    if (!media) return
++    const onChange = (event) => {
++      if (!localStorage.getItem(STORAGE_KEY)) setTheme(event.matches ? 'dark' : 'light')
++    }
++    media.addEventListener?.('change', onChange)
++    return () => media.removeEventListener?.('change', onChange)
++  }, [])
++
++  const value = useMemo(() => ({
++    theme,
++    isDark: theme === 'dark',
++    toggleTheme: () => setTheme(v => v === 'dark' ? 'light' : 'dark'),
++    setTheme,
++  }), [theme])
++
++  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
++}
++
++export const useTheme = () => useContext(ThemeContext)
+diff --git a/bulk-email-sender-v2/frontend/src/index.css b/bulk-email-sender-v2/frontend/src/index.css
+index 1e8898b564b0ba04c8130e31cc92af2cb1968e0f..4d0e9c49996db987a24e1699a69407dde63f3b2a 100644
+--- a/bulk-email-sender-v2/frontend/src/index.css
++++ b/bulk-email-sender-v2/frontend/src/index.css
+@@ -58,3 +58,116 @@ body {
+   background-size: 1rem 1rem;
+   animation: progress-stripe 1s linear infinite;
+ }
++
++
++/* -------------------------------------------------------------------------- */
++/* Dark theme                                                                */
++/* -------------------------------------------------------------------------- */
++html, body, #root {
++  min-height: 100%;
++}
++
++body {
++  transition: background-color 180ms ease, color 180ms ease;
++}
++
++[data-theme="dark"] body {
++  background: #020617;
++  color: #e2e8f0;
++}
++
++/* Neutral Tailwind surfaces */
++[data-theme="dark"] [class~="bg-slate-50"] { background-color: #020617 !important; }
++[data-theme="dark"] [class~="bg-slate-100"] { background-color: #0f172a !important; }
++[data-theme="dark"] [class~="bg-slate-200"] { background-color: #1e293b !important; }
++[data-theme="dark"] [class~="bg-white"] { background-color: #0f172a !important; }
++[data-theme="dark"] [class~="bg-white/95"] { background-color: rgba(15, 23, 42, .95) !important; }
++[data-theme="dark"] [class~="bg-slate-900/50"] { background-color: rgba(2, 6, 23, .72) !important; }
++
++[data-theme="dark"] [class~="text-slate-900"] { color: #f1f5f9 !important; }
++[data-theme="dark"] [class~="text-slate-800"] { color: #e2e8f0 !important; }
++[data-theme="dark"] [class~="text-slate-700"] { color: #cbd5e1 !important; }
++[data-theme="dark"] [class~="text-slate-600"] { color: #94a3b8 !important; }
++[data-theme="dark"] [class~="text-slate-500"] { color: #94a3b8 !important; }
++[data-theme="dark"] [class~="text-slate-400"] { color: #64748b !important; }
++
++[data-theme="dark"] [class~="border-slate-200"] { border-color: #334155 !important; }
++[data-theme="dark"] [class~="border-slate-100"] { border-color: #1e293b !important; }
++[data-theme="dark"] [class~="border-slate-300"] { border-color: #475569 !important; }
++[data-theme="dark"] [class~="border-slate-400"] { border-color: #64748b !important; }
++[data-theme="dark"] [class~="divide-slate-100"] > :not([hidden]) ~ :not([hidden]),
++[data-theme="dark"] [class~="divide-slate-50"] > :not([hidden]) ~ :not([hidden]) { border-color: #1e293b !important; }
++
++/* Common hover/focus states */
++[data-theme="dark"] [class~="hover:bg-slate-50"]:hover { background-color: #1e293b !important; }
++[data-theme="dark"] [class~="hover:bg-slate-100"]:hover { background-color: #1e293b !important; }
++[data-theme="dark"] [class~="hover:bg-white"]:hover { background-color: #1e293b !important; }
++[data-theme="dark"] [class~="hover:text-slate-900"]:hover { color: #f8fafc !important; }
++[data-theme="dark"] [class~="hover:text-slate-700"]:hover { color: #e2e8f0 !important; }
++[data-theme="dark"] [class~="hover:text-slate-600"]:hover { color: #cbd5e1 !important; }
++
++/* Form controls */
++[data-theme="dark"] input,
++[data-theme="dark"] select,
++[data-theme="dark"] textarea {
++  background-color: #0f172a;
++  color: #e2e8f0;
++  border-color: #334155;
++}
++[data-theme="dark"] input::placeholder,
++[data-theme="dark"] textarea::placeholder { color: #64748b; }
++[data-theme="dark"] input:focus,
++[data-theme="dark"] select:focus,
++[data-theme="dark"] textarea:focus { border-color: #3b82f6; }
++[data-theme="dark"] option { background: #0f172a; color: #e2e8f0; }
++
++/* Status/alert surfaces retain their semantic hue but gain dark contrast. */
++[data-theme="dark"] [class~="bg-blue-50"] { background-color: rgba(30, 64, 175, .22) !important; }
++[data-theme="dark"] [class~="bg-green-50"] { background-color: rgba(22, 101, 52, .22) !important; }
++[data-theme="dark"] [class~="bg-red-50"] { background-color: rgba(153, 27, 27, .22) !important; }
++[data-theme="dark"] [class~="bg-orange-50"] { background-color: rgba(154, 52, 18, .22) !important; }
++[data-theme="dark"] [class~="bg-amber-50"] { background-color: rgba(120, 53, 15, .24) !important; }
++[data-theme="dark"] [class~="bg-amber-100"] { background-color: rgba(146, 64, 14, .28) !important; }
++[data-theme="dark"] [class~="border-blue-100"] { border-color: rgba(96, 165, 250, .30) !important; }
++[data-theme="dark"] [class~="border-blue-200"] { border-color: rgba(96, 165, 250, .35) !important; }
++[data-theme="dark"] [class~="border-green-100"] { border-color: rgba(74, 222, 128, .25) !important; }
++[data-theme="dark"] [class~="border-red-200"] { border-color: rgba(248, 113, 113, .30) !important; }
++[data-theme="dark"] [class~="border-amber-200"],
++[data-theme="dark"] [class~="border-amber-300"] { border-color: rgba(251, 191, 36, .35) !important; }
++
++/* Better contrast for the neutral text used inside semantic cards. */
++[data-theme="dark"] [class~="text-blue-800"],
++[data-theme="dark"] [class~="text-blue-700"] { color: #93c5fd !important; }
++[data-theme="dark"] [class~="text-green-800"],
++[data-theme="dark"] [class~="text-green-700"],
++[data-theme="dark"] [class~="text-green-600"] { color: #86efac !important; }
++[data-theme="dark"] [class~="text-red-600"],
++[data-theme="dark"] [class~="text-red-500"] { color: #fca5a5 !important; }
++[data-theme="dark"] [class~="text-orange-800"],
++[data-theme="dark"] [class~="text-orange-700"],
++[data-theme="dark"] [class~="text-orange-600"],
++[data-theme="dark"] [class~="text-orange-500"] { color: #fdba74 !important; }
++[data-theme="dark"] [class~="text-amber-900"],
++[data-theme="dark"] [class~="text-amber-800"],
++[data-theme="dark"] [class~="text-amber-700"],
++[data-theme="dark"] [class~="text-amber-600"] { color: #fcd34d !important; }
++
++/* Toastify follows the selected theme. */
++[data-theme="dark"] .Toastify__toast {
++  background: #0f172a;
++  color: #e2e8f0;
++  border: 1px solid #334155;
++}
++[data-theme="dark"] .Toastify__close-button { color: #94a3b8; }
++
++/* Scrollbars */
++[data-theme="dark"] ::-webkit-scrollbar-track { background: #020617; }
++[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #334155; }
++
++@media (prefers-reduced-motion: reduce) {
++  *, *::before, *::after {
++    scroll-behavior: auto !important;
++    transition-duration: .01ms !important;
++    animation-duration: .01ms !important;
++  }
++}
+diff --git a/bulk-email-sender-v2/frontend/src/pages/LoginPage.jsx b/bulk-email-sender-v2/frontend/src/pages/LoginPage.jsx
+index 944848367a0c23e5fed7baba6a5b1bdbe6a91a50..686be101e9aa49f89e8527a5f07b57c5f2bac05d 100644
+--- a/bulk-email-sender-v2/frontend/src/pages/LoginPage.jsx
++++ b/bulk-email-sender-v2/frontend/src/pages/LoginPage.jsx
+@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
+ import { useGoogleLogin } from '@react-oauth/google'
+ import { toast } from 'react-toastify'
+ import { useAuth } from '../hooks/useAuth'
++import { useTheme } from '../hooks/useTheme'
+ import { googleLogin, adminLogin, getGoogleClientId } from '../services/api'
+ 
+ export default function LoginPage() {
+@@ -15,6 +16,7 @@ export default function LoginPage() {
+   const [hasGoogleAuth, setHasGoogleAuth] = useState(false)
+   const [checkingGoogle, setCheckingGoogle] = useState(true)
+   const { setAuth, user } = useAuth()
++  const { isDark, toggleTheme } = useTheme()
+   const navigate = useNavigate()
+ 
+   useEffect(() => {
+@@ -105,7 +107,20 @@ export default function LoginPage() {
+         </div>
+ 
+         {/* Card */}
+-        <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8">
++        <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-8 relative">
++          <button
++            type="button"
++            onClick={toggleTheme}
++            className="absolute top-4 right-4 p-2 rounded-lg text-slate-500 hover:bg-slate-100 transition-colors"
++            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
++            title={isDark ? 'Light mode' : 'Dark mode'}
++          >
++            {isDark ? (
++              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v2m0 14v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M3 12h2m14 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
++            ) : (
++              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
++            )}
++          </button>
+ 
+           {/* Demo Notice */}
+           <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4">
+diff --git a/bulk-email-sender-v2/frontend/src/services/api.js b/bulk-email-sender-v2/frontend/src/services/api.js
+index 33800f4d669e0f853a47683ddb80ec4fcad7b446..ad522039618bc03cfff7e712b04e257405723796 100644
+--- a/bulk-email-sender-v2/frontend/src/services/api.js
++++ b/bulk-email-sender-v2/frontend/src/services/api.js
+@@ -6,11 +6,12 @@ import axios from 'axios'
+ import { toast } from 'react-toastify'
+ 
+ // In production this points to your Render backend URL
+-const BASE_URL = import.meta.env.VITE_API_URL || '/api'
++const BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
+ 
+ const api = axios.create({
+   baseURL: BASE_URL,
+   withCredentials: false,   // JWT in header, not cookie
++  timeout: 30000,
+ })
+ 
+ // Attach JWT token to every request

@@ -34,11 +34,10 @@ from sqlalchemy.orm import DeclarativeBase, relationship
 # Put the provider's connection string in DATABASE_URL — any of these forms work:
 #   postgres://user:pass@host/db
 #   postgresql://user:pass@host/db?sslmode=require
-#   postgresql+asyncpg://user:pass@host/db
+#   postgresql://user:pass@host/db?sslmode=require
+#   postgresql+psycopg://user:pass@host/db
 #
-# asyncpg does NOT understand libpq query params such as `sslmode` and
-# `channel_binding` (providers like Neon add them to their URLs), so we strip
-# them from the URL and translate them into asyncpg `connect_args`.
+# Psycopg 3/libpq accepts standard PostgreSQL URL parameters directly.
 
 import logging
 from sqlalchemy.engine import make_url
@@ -50,57 +49,35 @@ _RAW_URL = os.getenv(
     "postgresql://postgres:postgres@localhost:5432/emailsender",
 ).strip()
 
-# Query params that libpq understands but asyncpg rejects
-_LIBPQ_ONLY_PARAMS = {"sslmode", "channel_binding", "sslrootcert", "sslcert", "sslkey", "options"}
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1", "db", "postgres"}
 
 
 def _build_engine_config(raw_url: str):
+    """Build a SQLAlchemy async engine configuration that is safe with PgBouncer.
+
+    Psycopg 3 is used instead of asyncpg because SQLAlchemy's asyncpg dialect
+    relies on prepared statements internally. Transaction/statement-pooling
+    PgBouncer deployments can invalidate those statements between requests.
+    Psycopg lets us explicitly disable automatic prepared statements with
+    ``prepare_threshold=None``.
+    """
     url = make_url(raw_url)
-
-    # Force the asyncpg driver whatever prefix the provider gave us
-    url = url.set(drivername="postgresql+asyncpg")
-
-    query = dict(url.query)
-    sslmode = str(query.get("sslmode", "")).lower()
-    for key in list(query):
-        if key in _LIBPQ_ONLY_PARAMS:
-            query.pop(key)
-    # Also honour an explicit ?ssl=... if someone already wrote it asyncpg-style
-    ssl_param = str(query.pop("ssl", "")).lower()
-    url = url.set(query=query)
+    url = url.set(drivername="postgresql+psycopg")
 
     host = (url.host or "").lower()
-    unix_socket = str(query.get("host", "")).startswith("/")
-    is_local = (not host) or unix_socket or host in _LOCAL_HOSTS or host.endswith(".local")
+    is_local = (not host) or host in _LOCAL_HOSTS or host.endswith(".local")
 
-    connect_args = {}
+    connect_args = {
+        # Critical for PgBouncer transaction/statement pooling.
+        "prepare_threshold": None,
+        "connect_timeout": int(os.getenv("DB_CONNECT_TIMEOUT", "30")),
+    }
 
-    # ── SSL ──
-    # Hosted databases require TLS. Local dev databases usually don't.
-    wanted = sslmode or ssl_param
-    if wanted in ("disable", "false", "0"):
-        pass
-    elif wanted in ("verify-ca", "verify-full"):
-        connect_args["ssl"] = wanted
-    elif wanted in ("require", "prefer", "allow", "true", "1"):
-        connect_args["ssl"] = "require"       # encrypted, like libpq sslmode=require
-    elif not is_local:
-        connect_args["ssl"] = "require"       # safe default for any remote host
-
-    # ── PgBouncer / prepared-statement compatibility ──
-    # The deployed PostgreSQL connection is using PgBouncer transaction/statement
-    # pooling. asyncpg prepared statements can become invalid when a pooled
-    # connection is switched between backend PostgreSQL connections.
-    #
-    # Disable asyncpg's statement cache and generate a unique prepared-statement
-    # name for every statement. This is safe for both pooled and direct
-    # PostgreSQL connections and avoids relying on hostname/port detection.
-    connect_args["statement_cache_size"] = 0
-    connect_args["prepared_statement_name_func"] = lambda: f"__asyncpg_{uuid.uuid4()}__"
-
-    # Fail fast instead of hanging forever if the DB is unreachable / waking up
-    connect_args["timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "30"))
+    # psycopg/libpq understands sslmode directly from DATABASE_URL. For URLs
+    # that omit it, require TLS for hosted databases while keeping local dev
+    # connections simple.
+    if not is_local and "sslmode" not in url.query:
+        connect_args["sslmode"] = "require"
 
     return url, connect_args
 
